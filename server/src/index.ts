@@ -7,7 +7,7 @@ import { WebSocketTransport } from "@colyseus/ws-transport";
 
 import { BattleRoom } from "./rooms/BattleRoom";
 
-const port = Number(process.env.PORT || 2567);
+const port = Number(process.env.PORT || 2568);
 const app = express();
 
 app.use(cors());
@@ -20,6 +20,7 @@ const gameServer = new Server({
   })
 });
 
+console.log("BattleRoom imported as:", typeof BattleRoom, BattleRoom);
 gameServer.define("battle", BattleRoom as any);
 
 app.get("/", (req, res) => {

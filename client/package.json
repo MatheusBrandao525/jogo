@@ -15,6 +15,7 @@
   "dependencies": {
     "babylonjs": "^9.3.0",
     "babylonjs-gui": "^9.3.0",
+    "babylonjs-loaders": "^9.3.0",
     "colyseus.js": "^0.16.22"
   }
 }
