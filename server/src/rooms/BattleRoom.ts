@@ -1,9 +1,17 @@
-// @ts-nocheck
-import { Room, Client } from "@colyseus/core";
+import { Room, Client } from "colyseus";
 import { BattleState, Player, Zone } from "./schema/BattleState";
+import { MatchSystem } from "./MatchSystem";
+import { ProgressionSystem } from "./ProgressionSystem";
+import { EventSystem } from "./EventSystem";
+import { CLASS_CONFIG } from "./ClassConfig";
 
-export class BattleRoom extends Room {
+export class BattleRoom extends Room<BattleState> {
   maxClients = 80;
+  matchSystem!: MatchSystem;
+  progressionSystem!: ProgressionSystem;
+  eventSystem!: EventSystem;
+  shootTimers = new Map<string, number>();
+
 
   onCreate (options: any) {
     this.setState(new BattleState());
@@ -11,6 +19,10 @@ export class BattleRoom extends Room {
     // Set patch rate and simulation interval
     this.setPatchRate(50); // 20 times per second
     this.setSimulationInterval((deltaTime) => this.update(deltaTime));
+
+    this.matchSystem = new MatchSystem(this, this.state);
+    this.progressionSystem = new ProgressionSystem(this, this.state);
+    this.eventSystem = new EventSystem(this, this.state);
 
     // Initialize map zones (simple linear frontline map)
     const zone1 = new Zone();
@@ -45,9 +57,37 @@ export class BattleRoom extends Room {
       }
     });
 
+    this.onMessage("change_class", (client, data) => {
+      const player = this.state.players.get(client.sessionId);
+      if (player && CLASS_CONFIG[data.classType]) {
+        if (player.level < CLASS_CONFIG[data.classType].unlockLevel) {
+          client.send("error", { message: `Level ${CLASS_CONFIG[data.classType].unlockLevel} needed for ${data.classType}!` });
+          return;
+        }
+
+        player.classType = data.classType;
+        player.maxHp = CLASS_CONFIG[data.classType].maxHp;
+        // Kill player so they respawn instantly as new class
+        if (!player.isDead) {
+          player.isDead = true;
+          player.hp = 0;
+          this.broadcast("kill", { killer: "Environment", victim: player.team });
+          this.triggerRespawn(player);
+        }
+      }
+    });
+
     this.onMessage("shoot", (client, data) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || player.isDead) return;
+
+      const playerConfig = CLASS_CONFIG[player.classType] || CLASS_CONFIG["Infantry"];
+      const now = Date.now();
+      const lastShoot = this.shootTimers.get(client.sessionId) || 0;
+      
+      // Server-side fire rate validation (with 20ms leniency for ping/lag)
+      if (now - lastShoot < playerConfig.fireRateMs - 20) return;
+      this.shootTimers.set(client.sessionId, now);
 
       // Broadcast shoot event to other clients for muzzle flash/sound
       this.broadcast("shoot", { id: client.sessionId }, { except: client });
@@ -57,38 +97,54 @@ export class BattleRoom extends Room {
       if (data.hitId) {
         const target = this.state.players.get(data.hitId);
         if (target && !target.isDead && target.team !== player.team) {
-          target.hp -= 40; // High damage
+          target.hp -= playerConfig.damage;
 
           if (target.hp <= 0) {
-            target.hp = 0;
-            target.isDead = true;
-            target.deaths += 1;
-            player.kills += 1;
+             target.hp = 0;
+             target.isDead = true;
+             target.deaths += 1;
+             player.kills += 1;
 
-            this.broadcast("kill", { killer: player.team, victim: target.team });
+             this.progressionSystem.grantXp(player, 100);
 
-            // Respawn after 3 seconds
-            setTimeout(() => {
-              target.isDead = false;
-              target.hp = 100;
-              // Reset to base pos
-              const baseX = target.team === "A" ? -100 : 100;
-              target.x = baseX;
-              target.y = 1;
-              target.z = 0;
-            }, 3000);
+             this.broadcast("kill", { killer: player.team, victim: target.team });
+             this.triggerRespawn(target);
           }
         }
       }
     });
   }
 
+  triggerRespawn(player: any) {
+    let respawnTime = 3000;
+    if (this.state.activeEvent === "Reinforcements " + player.team) {
+        respawnTime = 1000; // Fast respawn!
+    }
+
+    setTimeout(() => {
+      if (this.state.matchState !== "playing") return; // Let MatchSystem handle respawn if round ended
+      player.isDead = false;
+      player.hp = player.maxHp;
+      // Reset to base pos
+      const baseX = player.team === "A" ? -100 : 100;
+      player.x = baseX;
+      player.y = 1;
+      player.z = 0;
+    }, respawnTime);
+  }
+
   onJoin (client: Client, options: any) {
     console.log(client.sessionId, "joined!");
+
     const player = new Player();
     player.id = client.sessionId;
     
-    // Auto-balance teams
+    // Assign proper persistent memory DB reference
+    const userId = options.userId || client.sessionId;
+    this.progressionSystem.attachProgress(userId, player);
+
+    // Assign team
+    const numPlayers = this.state.players.size;
     let countA = 0;
     let countB = 0;
     this.state.players.forEach((p: any) => {
@@ -111,8 +167,9 @@ export class BattleRoom extends Room {
     this.state.players.set(client.sessionId, player);
   }
 
-  onLeave (client: Client, code?: number) {
+  onLeave (client: Client, consented?: boolean) {
     console.log(client.sessionId, "left!");
+    this.shootTimers.delete(client.sessionId);
     this.state.players.delete(client.sessionId);
   }
 
@@ -128,6 +185,10 @@ export class BattleRoom extends Room {
         if (dist <= zone.radius) {
           if (p.team === "A") playersA++;
           else if (p.team === "B") playersB++;
+          // Give capture XP actively staying inside the zone
+          if (this.state.matchState === "playing") {
+             this.progressionSystem.grantXp(p, 10 * (deltaTime / 1000));
+          }
         }
       });
 
@@ -143,15 +204,19 @@ export class BattleRoom extends Room {
 
       if (capturingTeam !== "neutral") {
         if (zone.owner !== capturingTeam) {
+          
+          let captureModifier = 1;
+          if (this.state.activeEvent === "Double Capture") captureModifier = 2;
+
           if (zone.capturingTeam !== capturingTeam && zone.captureProgress > 0) {
-            zone.captureProgress -= netCapture * (deltaTime / 100);
+            zone.captureProgress -= netCapture * (deltaTime / 100) * captureModifier;
             if (zone.captureProgress <= 0) {
               zone.capturingTeam = capturingTeam;
               zone.captureProgress = 0;
             }
           } else {
             zone.capturingTeam = capturingTeam;
-            zone.captureProgress += netCapture * (deltaTime / 100);
+            zone.captureProgress += netCapture * (deltaTime / 100) * captureModifier;
             if (zone.captureProgress >= 100) {
               zone.captureProgress = 100;
               zone.owner = capturingTeam;
@@ -169,14 +234,25 @@ export class BattleRoom extends Room {
     });
 
     // Score logic based on owned zones
-    let zonesA = 0;
-    let zonesB = 0;
+    let scoreGainA = 0;
+    let scoreGainB = 0;
     this.state.zones.forEach((zone: any) => {
-        if (zone.owner === "A") zonesA++;
-        if (zone.owner === "B") zonesB++;
+        let mult = zone.isHighValue ? 2 : 1;
+        if (zone.owner === "A") scoreGainA += mult;
+        if (zone.owner === "B") scoreGainB += mult;
     });
 
-    this.state.scoreA += zonesA * (deltaTime / 1000);
-    this.state.scoreB += zonesB * (deltaTime / 1000);
+    this.state.scoreA += scoreGainA * (deltaTime / 1000);
+    this.state.scoreB += scoreGainB * (deltaTime / 1000);
+
+    // Global Time match XP
+    if (this.state.matchState === "playing") {
+        this.state.players.forEach(p => {
+             this.progressionSystem.grantXp(p, 5 * (deltaTime / 1000));
+        });
+    }
+
+    this.matchSystem.update(deltaTime);
+    this.eventSystem.update(deltaTime);
   }
 }

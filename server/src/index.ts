@@ -1,9 +1,7 @@
-// @ts-nocheck
 import http from "http";
 import express from "express";
 import cors from "cors";
-import { Server } from "@colyseus/core";
-import { WebSocketTransport } from "@colyseus/ws-transport";
+import { Server } from "colyseus";
 
 import { BattleRoom } from "./rooms/BattleRoom";
 
@@ -15,13 +13,10 @@ app.use(express.json());
 
 const server = http.createServer(app);
 const gameServer = new Server({
-  transport: new WebSocketTransport({
-    server: server
-  })
+  server: server
 });
 
-console.log("BattleRoom imported as:", typeof BattleRoom, BattleRoom);
-gameServer.define("battle", BattleRoom as any);
+gameServer.define("battle", BattleRoom);
 
 app.get("/", (req, res) => {
   res.send("Colyseus Game Server is running!");
@@ -29,5 +24,5 @@ app.get("/", (req, res) => {
 
 gameServer.listen(port).then(() => {
   console.log(`Server is running!`);
-  console.log(`Listening on ws://localhost:${port}`);
+  console.log(`Listening on localhost:${port}`);
 });

@@ -12,6 +12,10 @@ export class Player extends Schema {
   @type("boolean") isDead: boolean = false;
   @type("number") kills: number = 0;
   @type("number") deaths: number = 0;
+  @type("string") classType: string = "Infantry";
+  @type("number") maxHp: number = 100;
+  @type("number") level: number = 1;
+  @type("number") xp: number = 0;
 }
 
 export class Zone extends Schema {
@@ -22,6 +26,7 @@ export class Zone extends Schema {
   @type("number") x: number = 0;
   @type("number") z: number = 0;
   @type("number") radius: number = 10;
+  @type("boolean") isHighValue: boolean = false;
 }
 
 export class BattleState extends Schema {
@@ -30,4 +35,16 @@ export class BattleState extends Schema {
 
   @type("number") scoreA: number = 0;
   @type("number") scoreB: number = 0;
+
+  // Match Flow
+  @type("number") timer: number = 300; // 5 minutes in seconds
+  @type("number") currentRound: number = 1;
+  @type("number") maxRounds: number = 5;
+  @type("number") roundWinsA: number = 0;
+  @type("number") roundWinsB: number = 0;
+  @type("string") matchState: string = "playing"; // "playing", "round_end", "match_end"
+  @type("string") statusMessage: string = "Round 1 Start!";
+
+  @type("string") activeEvent: string = "none";
+  @type("number") eventTimeLeft: number = 0;
 }

@@ -13,6 +13,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@colyseus/core": "^0.17.41",
+    "@colyseus/schema": "2.0.34",
     "@colyseus/ws-transport": "^0.17.13",
     "colyseus": "^0.17.9",
     "cors": "^2.8.6",

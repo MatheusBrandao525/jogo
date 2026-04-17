@@ -13,9 +13,10 @@
     "vite": "^8.0.4"
   },
   "dependencies": {
+    "@colyseus/schema": "2.0.34",
     "babylonjs": "^9.3.0",
     "babylonjs-gui": "^9.3.0",
     "babylonjs-loaders": "^9.3.0",
-    "colyseus.js": "^0.16.22"
+    "colyseus.js": "^0.17.0"
   }
 }

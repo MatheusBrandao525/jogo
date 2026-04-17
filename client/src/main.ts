@@ -5,9 +5,19 @@ import * as Colyseus from 'colyseus.js';
 import { ShootingSystem } from './systems/ShootingSystem';
 import { HealthSystem } from './systems/HealthSystem';
 import { EnvironmentSystem } from './systems/EnvironmentSystem';
+import { ClassSystem } from './systems/ClassSystem';
+import { ProgressionSystem } from './systems/ProgressionSystem';
+import { MinimapSystem } from './systems/MinimapSystem';
+import { MovementSystem } from './systems/MovementSystem';
+import { CLASS_CONFIG } from './systems/ClassConfig';
+import { CharacterRenderer } from './systems/CharacterRenderer';
+
 
 const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement;
 const engine = new BABYLON.Engine(canvas, true);
+
+// Prevent right-click context menu popping up on zoom
+canvas.oncontextmenu = (e) => e.preventDefault();
 
 let room: Colyseus.Room;
 let myPlayerId: string;
@@ -21,14 +31,35 @@ let envSystem: EnvironmentSystem;
 // Injected UI
 const uiContainer = document.getElementById("uiContainer") as HTMLElement;
 uiContainer.innerHTML = `
+    <div id="levelUpNotification" class="level-notification"></div>
+    <div id="classSelectionScreen" class="class-selection-overlay" style="display:none;"></div>
+    <div id="matchOverlay" class="match-overlay"></div>
     <div id="fullscreenOverlay"></div>
     <div class="kill-feed" id="killFeed"></div>
     <div class="hit-marker" id="hitMarker"></div>
     <div class="crosshair"></div>
+    <canvas id="minimap" class="minimap" width="200" height="200"></canvas>
+    
     <div class="hud-top">
-        <div class="score-A">Team A: <span id="scoreA">0</span></div>
-        <div class="score-B">Team B: <span id="scoreB">0</span></div>
+        <div class="progression-container">
+            <span id="levelText" style="font-weight:bold; color:#f1c40f;">Lvl 1</span>
+            <div class="xp-bar-container">
+                <div class="xp-bar-fill" id="xpFill"></div>
+            </div>
+        </div>
+        <div class="score-A">Score A: <span id="scoreA">0</span></div>
+        <div class="match-info">
+            <span id="roundNumber">Round 1</span> | <span id="matchTimer">5:00</span>
+            <br><span style="font-size:12px; font-weight:normal">Wins - A: <span id="winsA">0</span> | B: <span id="winsB">0</span></span>
+        </div>
+        <div class="score-B">Score B: <span id="scoreB">0</span></div>
     </div>
+    
+    <div class="event-banner" id="eventBanner" style="display:none;">
+        <h3 id="eventName">DOUBLE CAPTURE</h3>
+        <p id="eventTimer">20s</p>
+    </div>
+
     <div class="zones-container" id="zonesList"></div>
     <div class="hud-bottom">
         HP: <span id="hpText">100</span>
@@ -38,53 +69,75 @@ uiContainer.innerHTML = `
     </div>
 `;
 healthSystem.init("hpText", "hpFill", "fullscreenOverlay", "killFeed");
+    
+let classSystem: ClassSystem;
+let progressionSystem: ProgressionSystem;
+let minimapSystem: MinimapSystem;
+let movementSystem: MovementSystem;
 
 const createScene = function () {
     const scene = new BABYLON.Scene(engine);
+    scene.collisionsEnabled = true;
     
     // Environment & Atmosphere
     envSystem = new EnvironmentSystem(scene);
     envSystem.initialize(); // Loads GLBs asynchronously
 
     const camera = new BABYLON.UniversalCamera("camera1", new BABYLON.Vector3(0, 2, 0), scene);
+    camera.minZ = 0.2; // Prevent near-clipping into large objects
+    camera.angularSensibilityX = 5000;
+    camera.angularSensibilityY = 5000;
     camera.setTarget(BABYLON.Vector3.Zero());
     camera.attachControl(canvas, true);
     
-    // FPS controls & movement feel
-    camera.keysUp.push(87);    // W
-    camera.keysDown.push(83);  // S
-    camera.keysLeft.push(65);  // A
-    camera.keysRight.push(68); // D
-    camera.speed = 0.45;
-    camera.inertia = 0.85; // Better decel
-    camera.angularSensibility = 2000;
-    
-    // Heavier Gravity
+    // Heavier Gravity (for scene objects, not player anymore)
     scene.gravity = new BABYLON.Vector3(0, -18, 0);
-    camera.applyGravity = true;
-    camera.checkCollisions = true;
-    camera.ellipsoid = new BABYLON.Vector3(0.8, 1.2, 0.8);
+
+    movementSystem = new MovementSystem(scene, camera);
     
     shootingSystem = new ShootingSystem(scene, camera);
     shootingSystem.setHitMarkerElement(document.getElementById("hitMarker") as HTMLElement);
+    
+    // Pass asset manager to shooting system
+    shootingSystem.setAssetManager(envSystem.assetManager);
+
+    classSystem = new ClassSystem("classSelectionScreen", shootingSystem);
+    progressionSystem = new ProgressionSystem();
+    minimapSystem = new MinimapSystem("minimap");
+    
+    // We update gun visual once assets are ready
+    envSystem.initialize().then(() => {
+        shootingSystem.updateGunVisual(classSystem.activeClass);
+    });
 
     scene.onPointerDown = (evt) => {
         if (evt.button === 0) engine.enterPointerlock();
         if (evt.button === 1) engine.exitPointerlock();
-        if (evt.button === 0 && room) shootingSystem.shoot();
+        if (evt.button === 0) shootingSystem.shoot();
+        
+        // Right Click Zoom logic for Sniper
+        if (evt.button === 2 && classSystem.activeClass === "Sniper") {
+            camera.fov = 0.3; // Zoom in
+        }
     };
 
-    // Head Bobbing logic
+    scene.onPointerUp = (evt) => {
+        if (evt.button === 2) {
+            camera.fov = 0.8; // Restore normal FOV
+        }
+    };
+
+
+    // Head Bobbing logic mapping to body distance now
     let timeSeconds = 0;
-    let cameraPrePos = camera.position.clone();
+    let bodyPrePos = movementSystem.body.position.clone();
     
     scene.onBeforeRenderObservable.add(() => {
-        const dist = BABYLON.Vector3.Distance(camera.position, cameraPrePos);
-        cameraPrePos.copyFrom(camera.position);
+        const dist = BABYLON.Vector3.Distance(movementSystem.body.position, bodyPrePos);
+        bodyPrePos.copyFrom(movementSystem.body.position);
 
-        if (dist > 0.05 && camera.position.y <= 2.2) { // only bob if moving on ground
+        if (dist > 0.05 && movementSystem.body.position.y <= 1.2) { // only bob if moving on ground
             timeSeconds += engine.getDeltaTime() * 0.015;
-            // Apply slight vertical offset simulating foot steps
             camera.cameraRotation.x += Math.sin(timeSeconds) * 0.0015;
             camera.cameraRotation.y += Math.cos(timeSeconds * 0.5) * 0.001;
         }
@@ -93,18 +146,23 @@ const createScene = function () {
     return { scene, camera };
 };
 
-const createPlayerMesh = (scene: BABYLON.Scene, id: string, team: string) => {
-    // Player body
+const createPlayerMesh = (scene: BABYLON.Scene, id: string, team: string, classType: string = "Infantry") => {
+    // Player body collider
+    const cnf = CLASS_CONFIG[classType] || CLASS_CONFIG["Infantry"];
     const mesh = BABYLON.MeshBuilder.CreateCapsule("player_" + id, {radius: 0.6, height: 2.2}, scene);
-    const mat = new BABYLON.StandardMaterial("player_mat_" + id, scene);
-    mat.diffuseColor = team === "A" ? new BABYLON.Color3(0.2, 0.5, 1) : new BABYLON.Color3(1, 0.2, 0.2);
-    mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-    mesh.material = mat;
+    mesh.isVisible = false; // collider is invisible
+    
+    // Attach Character Visuals
+    const visual = CharacterRenderer.createLowPolyCharacter(scene, id, team, classType, envSystem.assetManager);
+    visual.parent = mesh;
+    visual.position.y = -1.1; // adjust to capsule center
+    
     mesh.position.y = 1.1;
+    mesh.scaling.setAll(cnf.scale);
     mesh.checkCollisions = true;
     
     if (envSystem.shadowGenerator) {
-        envSystem.shadowGenerator.addShadowCaster(mesh);
+        visual.getChildMeshes().forEach(m => envSystem.shadowGenerator!.addShadowCaster(m));
     }
 
     // Floating Team Marker above player's head for distant visibility
@@ -120,31 +178,59 @@ const createPlayerMesh = (scene: BABYLON.Scene, id: string, team: string) => {
 const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCamera) => {
     const client = new Colyseus.Client('ws://localhost:2568');
 
+    // Simple temporary persistence mechanism
+    let storedUserId = localStorage.getItem("jogo_user_id");
+    if (!storedUserId) {
+        storedUserId = Math.random().toString(36).substring(2, 15);
+        localStorage.setItem("jogo_user_id", storedUserId);
+    }
+
     try {
-        room = await client.joinOrCreate("battle");
+        room = await client.joinOrCreate("battle", { userId: storedUserId });
         myPlayerId = room.sessionId;
         shootingSystem.setRoom(room);
+
+        room.onMessage("level_up", (data: { level: number }) => {
+            progressionSystem.triggerLevelUp(data.level);
+        });
 
         room.onMessage("kill", (message: { killer: string, victim: string, killerId?: string }) => {
             const isMyKill = message.killer === myTeam; 
             healthSystem.logKill(message.killer, message.victim, isMyKill);
         });
 
+        room.onMessage("round_start", () => {
+            // Teleport player body back to base
+            movementSystem.body.position.x = myTeam === "A" ? -100 : 100;
+            movementSystem.body.position.y = 2.4;
+            movementSystem.body.position.z = 0;
+            camera.rotation.setAll(0);
+        });
+
         room.state.players.onAdd((player: any, sessionId: string) => {
             if (sessionId === myPlayerId) {
                 myTeam = player.team;
-                camera.position.x = player.x;
-                camera.position.y = 2.4;
-                camera.position.z = player.z;
+                movementSystem.body.position.x = player.x;
+                movementSystem.body.position.y = player.y;
+                movementSystem.body.position.z = player.z;
                 
                 healthSystem.updateHealth(player.hp, player.isDead);
+                classSystem.setRoom(room);
+                minimapSystem.setContext(room, myPlayerId, myTeam);
+
+                // Initial UI pass
+                classSystem.setPlayerLevel(player.level);
+                progressionSystem.updateUI(player.level, player.xp);
 
                 player.onChange(() => {
                     healthSystem.updateHealth(player.hp, player.isDead);
+                    classSystem.setPlayerLevel(player.level);
+                    progressionSystem.updateUI(player.level, player.xp);
+                    movementSystem.applyClassProfile(player.classType);
                 });
 
             } else {
-                const { mesh, marker } = createPlayerMesh(scene, sessionId, player.team);
+                const { mesh, marker } = createPlayerMesh(scene, sessionId, player.team, player.classType);
                 players[sessionId] = { mesh, marker };
 
                 player.onChange(() => {
@@ -156,11 +242,15 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                             players[sessionId].mesh.isVisible = true;
                             players[sessionId].marker.isVisible = true;
                             
+                            // Dynamic Scale updates based on Class changes
+                            const cnf = CLASS_CONFIG[player.classType] || CLASS_CONFIG["Infantry"];
+                            players[sessionId].mesh.scaling.setAll(cnf.scale);
+
                             players[sessionId].mesh.position.set(player.x, player.y, player.z);
                             players[sessionId].mesh.rotation.y = player.rotY;
                             
                             // Align marker directly above the player
-                            players[sessionId].marker.position.set(player.x, player.y + 1.8, player.z);
+                            players[sessionId].marker.position.set(player.x, player.y + (1.8 * cnf.scale), player.z);
                         }
                     }
                 });
@@ -216,24 +306,78 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
              });
         });
 
-        room.state.onChange(() => {
+        const updateHUD = () => {
+            if (!room) return;
             const scoreA = document.getElementById("scoreA");
             const scoreB = document.getElementById("scoreB");
+            const winsA = document.getElementById("winsA");
+            const winsB = document.getElementById("winsB");
+            const roundNumber = document.getElementById("roundNumber");
+            const matchTimer = document.getElementById("matchTimer");
+            const matchOverlay = document.getElementById("matchOverlay");
+
             if(scoreA && scoreB) {
-                scoreA.innerText = Math.floor(room.state.scoreA).toString();
-                scoreB.innerText = Math.floor(room.state.scoreB).toString();
+                scoreA.innerText = Math.floor(room.state.scoreA || 0).toString();
+                scoreB.innerText = Math.floor(room.state.scoreB || 0).toString();
             }
+            if(winsA && winsB) {
+                winsA.innerText = (room.state.roundWinsA || 0).toString();
+                winsB.innerText = (room.state.roundWinsB || 0).toString();
+                roundNumber!.innerText = `Round ${room.state.currentRound || 1}`;
+                
+                // Format Timer
+                const timerVal = room.state.timer || 0;
+                const m = Math.floor(timerVal / 60);
+                const s = Math.floor(timerVal % 60);
+                matchTimer!.innerText = `${m}:${s < 10 ? '0' : ''}${s}`;
+            }
+            
+            if (matchOverlay) {
+                if (room.state.matchState === "round_end" || room.state.matchState === "match_end") {
+                    matchOverlay.innerText = room.state.statusMessage;
+                    matchOverlay.classList.add("active");
+                } else if (room.state.timer > 295) { // Show "Round Start" for first 5 seconds
+                    matchOverlay.innerText = room.state.statusMessage;
+                    matchOverlay.classList.add("active");
+                } else {
+                    matchOverlay.classList.remove("active");
+                }
+            }
+
+            const eb = document.getElementById("eventBanner");
+            if (eb) {
+                if (room.state.activeEvent !== "none") {
+                    eb.style.display = "block";
+                    document.getElementById("eventName")!.innerText = room.state.activeEvent.toUpperCase();
+                    document.getElementById("eventTimer")!.innerText = Math.ceil(room.state.eventTimeLeft) + "s";
+                } else {
+                    eb.style.display = "none";
+                }
+            }
+        };
+
+        room.state.onChange(() => {
+             updateHUD();
         });
 
         scene.onBeforeRenderObservable.add(() => {
-            if (room && myPlayerId) {
+             updateHUD();
+            if (room && myPlayerId && movementSystem) {
                 room.send("move", {
-                    x: camera.position.x,
-                    y: camera.position.y - 1.2, // Send foot height relative
-                    z: camera.position.z,
+                    x: movementSystem.body.position.x,
+                    y: Math.max(0, movementSystem.body.position.y - 1.1), // Send foot level relative to schema
+                    z: movementSystem.body.position.z,
                     rotX: camera.rotation.x,
                     rotY: camera.rotation.y
                 });
+            }
+        });
+
+        // Show class menu on connect and via 'C'
+        classSystem.show();
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'c' || e.key === 'C') {
+                classSystem.show();
             }
         });
 
@@ -260,6 +404,7 @@ const { scene, camera } = createScene();
 
 engine.runRenderLoop(() => {
     scene.render();
+    if (minimapSystem) minimapSystem.update();
 });
 
 window.addEventListener('resize', () => {
