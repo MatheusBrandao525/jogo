@@ -6,7 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "ts-node src/index.ts",
-    "dev": "nodemon --watch src -e ts --exec ts-node src/index.ts"
+    "dev": "nodemon --watch src -e ts --exec ts-node --transpile-only src/index.ts"
   },
   "keywords": [],
   "author": "",
@@ -14,7 +14,7 @@
   "type": "commonjs",
   "dependencies": {
     "@colyseus/core": "^0.17.41",
-    "@colyseus/schema": "2.0.34",
+    "@colyseus/schema": "^4.0.20",
     "@colyseus/ws-transport": "^0.17.13",
     "colyseus": "^0.17.9",
     "cors": "^2.8.6",
@@ -25,6 +25,6 @@
     "@types/express": "^5.0.6",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.2"
+    "typescript": "^5.4.5"
   }
 }

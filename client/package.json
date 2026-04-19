@@ -9,14 +9,14 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "typescript": "~6.0.2",
+    "typescript": "^5.4.5",
     "vite": "^8.0.4"
   },
   "dependencies": {
-    "@colyseus/schema": "2.0.34",
+    "@colyseus/schema": "^4.0.20",
     "babylonjs": "^9.3.0",
     "babylonjs-gui": "^9.3.0",
     "babylonjs-loaders": "^9.3.0",
-    "colyseus.js": "^0.17.0"
+    "colyseus.js": "^0.16.22"
   }
 }

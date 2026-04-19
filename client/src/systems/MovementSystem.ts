@@ -40,11 +40,13 @@ export class MovementSystem {
         this.body.checkCollisions = true; 
         this.body.ellipsoid = new BABYLON.Vector3(0.4, 0.9, 0.4);
         this.body.ellipsoidOffset = new BABYLON.Vector3(0, 0, 0);
-        this.body.isVisible = false; 
+        this.body.isVisible = true; // Third person: show own body
 
-        // Parent camera to body's head level
+        // Parent camera to body with Third Person Offset
         this.camera.parent = this.body;
-        this.camera.position = new BABYLON.Vector3(0, 1.8, 0);
+        // Over-the-shoulder look: slightly behind, up, and to the side
+        this.camera.position = new BABYLON.Vector3(1.0, 3.5, -5.0);
+        this.camera.setTarget(new BABYLON.Vector3(0, 1.5, 2));
 
         // Anti-sticking: Dampen velocity if we hit something
         this.body.onCollide = () => {

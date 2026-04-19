@@ -1,11 +1,11 @@
-import { Room, Client } from "colyseus";
+import { Room, Client } from "@colyseus/core";
 import { BattleState, Player, Zone } from "./schema/BattleState";
 import { MatchSystem } from "./MatchSystem";
 import { ProgressionSystem } from "./ProgressionSystem";
 import { EventSystem } from "./EventSystem";
 import { CLASS_CONFIG } from "./ClassConfig";
 
-export class BattleRoom extends Room<BattleState> {
+export class BattleRoom extends Room<any, any> {
   maxClients = 80;
   matchSystem!: MatchSystem;
   progressionSystem!: ProgressionSystem;
@@ -133,7 +133,7 @@ export class BattleRoom extends Room<BattleState> {
     }, respawnTime);
   }
 
-  onJoin (client: Client, options: any) {
+  onJoin (client: Client, options: any, auth?: any) {
     console.log(client.sessionId, "joined!");
 
     const player = new Player();
@@ -167,7 +167,7 @@ export class BattleRoom extends Room<BattleState> {
     this.state.players.set(client.sessionId, player);
   }
 
-  onLeave (client: Client, consented?: boolean) {
+  onLeave (client: Client, code?: number) {
     console.log(client.sessionId, "left!");
     this.shootTimers.delete(client.sessionId);
     this.state.players.delete(client.sessionId);

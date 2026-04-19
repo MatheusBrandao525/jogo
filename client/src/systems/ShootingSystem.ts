@@ -16,6 +16,7 @@ export class ShootingSystem {
     private impactParticles: BABYLON.ParticleSystem;
     private muzzleParticles: BABYLON.ParticleSystem;
     private muzzleEmitter: BABYLON.AbstractMesh;
+    private muzzleNode: BABYLON.TransformNode;
     private muzzleFlare: BABYLON.Mesh;
     private tracerPool: BABYLON.Mesh[] = [];
     private tracerMat: BABYLON.StandardMaterial;
@@ -47,8 +48,12 @@ export class ShootingSystem {
         this.impactParticles.updateSpeed = 0.01;
         this.impactParticles.start();
 
+        // Muzzle Node (Anchor point at barrel tip)
+        this.muzzleNode = new BABYLON.TransformNode("muzzleNode", this.scene);
+
         // Muzzle Flash Spark Particles
         this.muzzleEmitter = new BABYLON.AbstractMesh("muzzleEmitter", this.scene);
+        this.muzzleEmitter.parent = this.muzzleNode;
         this.muzzleParticles = new BABYLON.ParticleSystem("muzzle", 100, this.scene);
         this.muzzleParticles.particleTexture = new BABYLON.Texture("https://raw.githubusercontent.com/PatrickRyanMS/BabylonJS_Resources/master/ParticleUtils/textures/flare.png", this.scene);
         this.muzzleParticles.emitter = this.muzzleEmitter;
@@ -69,9 +74,13 @@ export class ShootingSystem {
         // Muzzle Flare (Small glowing sphere)
         this.muzzleFlare = BABYLON.MeshBuilder.CreateSphere("muzzleFlare", {diameter: 0.15}, this.scene);
         const flareMat = new BABYLON.StandardMaterial("flareMat", this.scene);
-        flareMat.emissiveColor = new BABYLON.Color3(1, 0.7, 0.2);
+        flareMat.emissiveColor = new BABYLON.Color3(1, 0.8, 0.2);
         this.muzzleFlare.material = flareMat;
         this.muzzleFlare.isVisible = false;
+        this.muzzleFlare.parent = this.muzzleNode;
+        this.muzzleFlare.renderingGroupId = 2; // Render on top
+
+        this.muzzleLight.parent = this.muzzleNode;
 
         // Tracer Material
         this.tracerMat = new BABYLON.StandardMaterial("tracerMat", this.scene);
@@ -138,8 +147,8 @@ export class ShootingSystem {
         stock.parent = gunRoot;
         mag.parent = gunRoot;
 
-        gunRoot.position = new BABYLON.Vector3(0.5, -0.6, 1.0);
-        gunRoot.parent = this.camera;
+        gunRoot.position = new BABYLON.Vector3(0.5, 0.4, 0.5); // Hold at right side
+        gunRoot.parent = this.scene.getMeshByName("localPlayerBody");
         this.gunMesh = gunRoot;
     }
 
@@ -153,9 +162,10 @@ export class ShootingSystem {
             if (newGun) {
                 if (this.gunMesh) this.gunMesh.dispose();
                 this.gunMesh = newGun;
-                this.gunMesh.parent = this.camera;
+                this.gunMesh.parent = this.scene.getMeshByName("localPlayerBody");
                 
-                // Fine-tuned FPS positions
+                // Position relative to the character (Right shoulder/hand area)
+                this.gunMesh.position = new BABYLON.Vector3(0.5, 0.2, 0.2);
                 if (assetKey === "gun_sniper") {
                     this.gunMesh.position = new BABYLON.Vector3(0.3, -0.4, 0.8);
                     this.gunMesh.scaling.setAll(1.1);
@@ -170,6 +180,18 @@ export class ShootingSystem {
 
                 // Point gun FORWARD correctly (Many GLB models face +X or -Z)
                 this.gunMesh.rotation.set(0, Math.PI / 2, 0); 
+
+                // ATTACH MUZZLE NODE TO BARREL TIP
+                this.muzzleNode.parent = this.gunMesh;
+                // Fine-tuning based on Assault Rifle geometry
+                this.muzzleNode.position = new BABYLON.Vector3(-0.9, 0.05, 0); 
+
+                // DEBUG: Small green sphere to find the tip
+                const debugTip = BABYLON.MeshBuilder.CreateSphere("debugTip", {diameter: 0.1}, this.scene);
+                debugTip.parent = this.muzzleNode;
+                debugTip.material = new BABYLON.StandardMaterial("debugMat", this.scene);
+                (debugTip.material as BABYLON.StandardMaterial).emissiveColor = new BABYLON.Color3(0, 1, 0);
+                setTimeout(() => debugTip.dispose(), 5000);
                 
                 // Ensure all parts are visible
                 this.gunMesh.getChildMeshes().forEach(m => m.isVisible = true);
@@ -227,9 +249,8 @@ export class ShootingSystem {
         const now = Date.now();
         if (now - this.lastShootTime < this.COOLDOWN) return;
         this.lastShootTime = now;
-
+        
         this.applyRecoil();
-        this.playMuzzleFlash();
 
         // New Logic: Create ray from mouse cursor (works for both locked and free mouse)
         const ray = this.scene.createPickingRay(
@@ -253,9 +274,19 @@ export class ShootingSystem {
             this.showHitMarker();
         }
         
+        // 1. Calculate the Muzzle Position in World Space
+        // We use the weapon's direction and a fixed barrel length
+        const weaponForward = this.gunMesh.getDirection(BABYLON.Axis.X).scale(-0.85);
+        const muzzlePos = this.gunMesh.getAbsolutePosition().add(weaponForward);
+        // Add a tiny bit of height for the barrel alignment
+        muzzlePos.y += 0.05;
+
         // Visual effects (independent of server)
         const targetPos = hit && hit.hit ? hit.pickedPoint! : origin.add(forward.scale(150));
-        this.createTracer(origin.add(forward.scale(1.0)), targetPos, !!hitId);
+        
+        // Start tracer at the REAL muzzle
+        this.createTracer(muzzlePos, targetPos, !!hitId);
+        this.playMuzzleEffectAt(muzzlePos);
         
         if (hit && hit.hit && hit.pickedPoint) {
             this.playImpactEffect(hit.pickedPoint);
@@ -311,38 +342,25 @@ export class ShootingSystem {
         this.camera.cameraRotation.y += recoilAmountX;
     }
 
-    private playMuzzleFlash() {
-        const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
-        const right = this.camera.getDirection(BABYLON.Vector3.Right());
-        const up = this.camera.getDirection(BABYLON.Vector3.Up());
+    private playMuzzleEffectAt(pos: BABYLON.Vector3) {
+        this.muzzleLight.position = pos;
+        this.muzzleFlare.position = pos;
+        this.muzzleEmitter.position = pos;
         
-        // Offset from camera to gun tip (matches our gun positioning)
-        const muzzlePos = this.camera.getAbsolutePosition()
-            .add(forward.scale(1.2)) // tucking depth slightly back
-            .add(right.scale(0.35))   
-            .add(up.scale(-0.4));    
+        // Point particles forward in world space
+        const worldForward = this.camera.getDirection(BABYLON.Vector3.Forward());
+        this.muzzleParticles.direction1 = worldForward.scale(5);
+        this.muzzleParticles.direction2 = worldForward.scale(10);
         
-        this.muzzleEmitter.position = muzzlePos;
-        this.muzzleLight.position = muzzlePos;
-        this.muzzleFlare.position = muzzlePos;
-        
-        // Point particles forward
-        this.muzzleParticles.direction1 = forward.scale(5);
-        this.muzzleParticles.direction2 = forward.scale(10);
-        
-        this.muzzleParticles.manualEmitCount = 15;
-        this.muzzleLight.intensity = 2; // high flash
+        // Trigger visuals
+        this.muzzleLight.intensity = 4.0;
         this.muzzleFlare.isVisible = true;
+        this.muzzleParticles.manualEmitCount = 20;
         
-        // Rapidly lower intensity
-        const fadeInt = setInterval(() => {
-            this.muzzleLight.intensity -= 0.4;
-            if (this.muzzleLight.intensity <= 0) {
-                this.muzzleLight.intensity = 0;
-                this.muzzleFlare.isVisible = false;
-                clearInterval(fadeInt);
-            }
-        }, 16);
+        setTimeout(() => {
+            this.muzzleLight.intensity = 0;
+            if (this.muzzleFlare) this.muzzleFlare.isVisible = false;
+        }, 65);
     }
 
     private showHitMarker() {
