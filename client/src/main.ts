@@ -1,6 +1,6 @@
 import './style.css';
 import * as BABYLON from 'babylonjs';
-import * as Colyseus from 'colyseus.js';
+import * as Colyseus from '@colyseus/sdk';
 
 import { ShootingSystem } from './systems/ShootingSystem';
 import { HealthSystem } from './systems/HealthSystem';
@@ -11,6 +11,7 @@ import { MinimapSystem } from './systems/MinimapSystem';
 import { MovementSystem } from './systems/MovementSystem';
 import { CLASS_CONFIG } from './systems/ClassConfig';
 import { CharacterRenderer } from './systems/CharacterRenderer';
+import { BattleState } from './schema/BattleState';
 
 
 const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement;
@@ -19,7 +20,7 @@ const engine = new BABYLON.Engine(canvas, true);
 // Prevent right-click context menu popping up on zoom
 canvas.oncontextmenu = (e) => e.preventDefault();
 
-let room: Colyseus.Room;
+let room: Colyseus.Room<BattleState>;
 let myPlayerId: string;
 let myTeam: string;
 const players: { [id: string]: { mesh: BABYLON.Mesh, marker: BABYLON.Mesh } } = {};
@@ -186,7 +187,7 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
     }
 
     try {
-        room = await client.joinOrCreate("battle", { userId: storedUserId });
+        room = await client.joinOrCreate<BattleState>("battle", { userId: storedUserId });
         myPlayerId = room.sessionId;
         shootingSystem.setRoom(room);
 

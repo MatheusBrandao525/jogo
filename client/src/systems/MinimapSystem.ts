@@ -1,4 +1,4 @@
-import * as Colyseus from 'colyseus.js';
+import * as Colyseus from '@colyseus/sdk';
 
 export class MinimapSystem {
     private canvas: HTMLCanvasElement;

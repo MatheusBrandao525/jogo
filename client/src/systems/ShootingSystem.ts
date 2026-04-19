@@ -1,5 +1,5 @@
 import * as BABYLON from 'babylonjs';
-import * as Colyseus from 'colyseus.js';
+import * as Colyseus from '@colyseus/sdk';
 
 export class ShootingSystem {
     private scene: BABYLON.Scene;
@@ -264,7 +264,7 @@ export class ShootingSystem {
             return !m.name.includes("localPlayerBody") && m.isVisible;
         });
 
-        const origin = this.camera.getAbsolutePosition();
+        const origin = this.camera.position;
         const forward = ray.direction; // Follow the ray direction
 
         // Resolve hit target

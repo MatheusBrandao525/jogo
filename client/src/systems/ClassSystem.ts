@@ -1,4 +1,4 @@
-import * as Colyseus from 'colyseus.js';
+import * as Colyseus from '@colyseus/sdk';
 import { CLASS_CONFIG } from './ClassConfig';
 import { ShootingSystem } from './ShootingSystem';
 
