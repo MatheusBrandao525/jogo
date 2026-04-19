@@ -32,6 +32,11 @@ let envSystem: EnvironmentSystem;
 // Injected UI
 const uiContainer = document.getElementById("uiContainer") as HTMLElement;
 uiContainer.innerHTML = `
+    <div id="startScreen" class="start-screen">
+        <h1>BATTLEFIELD</h1>
+        <p>LOW-POLY COMBAT ARENA</p>
+        <button class="play-button" id="playBtn">Play</button>
+    </div>
     <div id="levelUpNotification" class="level-notification"></div>
     <div id="classSelectionScreen" class="class-selection-overlay" style="display:none;"></div>
     <div id="matchOverlay" class="match-overlay"></div>
@@ -41,7 +46,7 @@ uiContainer.innerHTML = `
     <div class="crosshair"></div>
     <canvas id="minimap" class="minimap" width="200" height="200"></canvas>
     
-    <div class="hud-top">
+    <div class="hud-top" style="display:none;" id="hudTop">
         <div class="progression-container">
             <span id="levelText" style="font-weight:bold; color:#f1c40f;">Lvl 1</span>
             <div class="xp-bar-container">
@@ -62,13 +67,18 @@ uiContainer.innerHTML = `
     </div>
 
     <div class="zones-container" id="zonesList"></div>
-    <div class="hud-bottom">
+    <div class="hud-bottom" style="display:none;" id="hudBottom">
         HP: <span id="hpText">100</span>
         <div class="health-bar-container">
             <div class="health-bar-fill" id="hpFill"></div>
         </div>
     </div>
 `;
+
+document.getElementById("playBtn")!.addEventListener("click", () => {
+    document.getElementById("startScreen")!.style.display = "none";
+    connectColyseus(scene, camera);
+});
 healthSystem.init("hpText", "hpFill", "fullscreenOverlay", "killFeed");
     
 let classSystem: ClassSystem;
@@ -208,103 +218,109 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
             camera.rotation.setAll(0);
         });
 
-        room.state.players.onAdd((player: any, sessionId: string) => {
-            if (sessionId === myPlayerId) {
-                myTeam = player.team;
-                movementSystem.body.position.x = player.x;
-                movementSystem.body.position.y = player.y;
-                movementSystem.body.position.z = player.z;
-                
-                healthSystem.updateHealth(player.hp, player.isDead);
-                classSystem.setRoom(room);
-                minimapSystem.setContext(room, myPlayerId, myTeam);
-
-                // Initial UI pass
-                classSystem.setPlayerLevel(player.level);
-                progressionSystem.updateUI(player.level, player.xp);
-
-                player.onChange(() => {
+        room.onStateChange.once(() => {
+            room.state.players.onAdd((player: any, sessionId: string) => {
+                if (sessionId === myPlayerId) {
+                    myTeam = player.team;
+                    movementSystem.body.position.x = player.x;
+                    movementSystem.body.position.y = player.y;
+                    movementSystem.body.position.z = player.z;
+                    
                     healthSystem.updateHealth(player.hp, player.isDead);
+                    classSystem.setRoom(room);
+                    minimapSystem.setContext(room, myPlayerId, myTeam);
+
+                    // Show HUD elements
+                    document.getElementById("hudTop")!.style.display = "flex";
+                    document.getElementById("hudBottom")!.style.display = "block";
+
+                    // Initial UI pass
                     classSystem.setPlayerLevel(player.level);
                     progressionSystem.updateUI(player.level, player.xp);
-                    movementSystem.applyClassProfile(player.classType);
-                });
 
-            } else {
-                const { mesh, marker } = createPlayerMesh(scene, sessionId, player.team, player.classType);
-                players[sessionId] = { mesh, marker };
+                    player.onChange(() => {
+                        healthSystem.updateHealth(player.hp, player.isDead);
+                        classSystem.setPlayerLevel(player.level);
+                        progressionSystem.updateUI(player.level, player.xp);
+                        movementSystem.applyClassProfile(player.classType);
+                    });
 
-                player.onChange(() => {
-                    if (players[sessionId]) {
-                        if (player.isDead) {
-                            players[sessionId].mesh.isVisible = false;
-                            players[sessionId].marker.isVisible = false;
-                        } else {
-                            players[sessionId].mesh.isVisible = true;
-                            players[sessionId].marker.isVisible = true;
-                            
-                            // Dynamic Scale updates based on Class changes
-                            const cnf = CLASS_CONFIG[player.classType] || CLASS_CONFIG["Infantry"];
-                            players[sessionId].mesh.scaling.setAll(cnf.scale);
+                } else {
+                    const { mesh, marker } = createPlayerMesh(scene, sessionId, player.team, player.classType);
+                    players[sessionId] = { mesh, marker };
 
-                            players[sessionId].mesh.position.set(player.x, player.y, player.z);
-                            players[sessionId].mesh.rotation.y = player.rotY;
-                            
-                            // Align marker directly above the player
-                            players[sessionId].marker.position.set(player.x, player.y + (1.8 * cnf.scale), player.z);
+                    player.onChange(() => {
+                        if (players[sessionId]) {
+                            if (player.isDead) {
+                                players[sessionId].mesh.isVisible = false;
+                                players[sessionId].marker.isVisible = false;
+                            } else {
+                                players[sessionId].mesh.isVisible = true;
+                                players[sessionId].marker.isVisible = true;
+                                
+                                // Dynamic Scale updates based on Class changes
+                                const cnf = CLASS_CONFIG[player.classType] || CLASS_CONFIG["Infantry"];
+                                players[sessionId].mesh.scaling.setAll(cnf.scale);
+
+                                players[sessionId].mesh.position.set(player.x, player.y, player.z);
+                                players[sessionId].mesh.rotation.y = player.rotY;
+                                
+                                // Align marker directly above the player
+                                players[sessionId].marker.position.set(player.x, player.y + (1.8 * cnf.scale), player.z);
+                            }
                         }
-                    }
+                    });
+                }
+            });
+
+            room.state.players.onRemove((_player: any, sessionId: string) => {
+                if (players[sessionId]) {
+                    players[sessionId].mesh.dispose();
+                    players[sessionId].marker.dispose();
+                    delete players[sessionId];
+                }
+            });
+
+            room.state.zones.onAdd((zone: any, _key: string) => {
+                updateZonesHUD(room.state.zones);
+                
+                // Base Visualization 
+                const disk = BABYLON.MeshBuilder.CreateCylinder("zone_disk", {diameter: zone.radius * 2, height: 0.1}, scene);
+                disk.position.set(zone.x, 0.05, zone.z);
+                const diskMat = new BABYLON.StandardMaterial("zone_disk_mat", scene);
+                diskMat.alpha = 0.2;
+                diskMat.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+                disk.material = diskMat;
+                
+                // Animated Fill ring based on progress
+                const fill = BABYLON.MeshBuilder.CreateCylinder("zone_fill", {diameter: zone.radius * 2, height: 0.2}, scene);
+                fill.position.set(zone.x, 0.06, zone.z);
+                const fillMat = new BABYLON.StandardMaterial("zone_fill_mat", scene);
+                fillMat.alpha = 0.5;
+                fillMat.emissiveColor = new BABYLON.Color3(0.5,0.5,0.5);
+                fill.material = fillMat;
+                fill.scaling.set(0.01, 1, 0.01); // starts empty
+
+                zone.onChange(() => {
+                    updateZonesHUD(room.state.zones);
+                    
+                    // Recolor base matching owner
+                    if(zone.owner === "A") diskMat.diffuseColor = new BABYLON.Color3(0.2,0.5,1);
+                    else if(zone.owner === "B") diskMat.diffuseColor = new BABYLON.Color3(1,0.2,0.2);
+                    else diskMat.diffuseColor = new BABYLON.Color3(0.5,0.5,0.5);
+                    
+                    // Recolor fill matching capturer team
+                    let cColor = new BABYLON.Color3(0.5,0.5,0.5);
+                    if(zone.capturingTeam === "A") cColor = new BABYLON.Color3(0.2,0.5,1.0);
+                    else if(zone.capturingTeam === "B") cColor = new BABYLON.Color3(1.0,0.2,0.2);
+                    fillMat.emissiveColor = cColor;
+                    fillMat.diffuseColor = cColor;
+                    
+                    // Update Scale representing capture progress (0 - 100%)
+                    const p = Math.max(0.01, zone.captureProgress / 100);
+                    fill.scaling.set(p, 1, p);
                 });
-            }
-        });
-
-        room.state.players.onRemove((_player: any, sessionId: string) => {
-            if (players[sessionId]) {
-                players[sessionId].mesh.dispose();
-                players[sessionId].marker.dispose();
-                delete players[sessionId];
-            }
-        });
-
-        room.state.zones.onAdd((zone: any, _key: string) => {
-             updateZonesHUD(room.state.zones);
-             
-             // Base Visualization 
-             const disk = BABYLON.MeshBuilder.CreateCylinder("zone_disk", {diameter: zone.radius * 2, height: 0.1}, scene);
-             disk.position.set(zone.x, 0.05, zone.z);
-             const diskMat = new BABYLON.StandardMaterial("zone_disk_mat", scene);
-             diskMat.alpha = 0.2;
-             diskMat.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
-             disk.material = diskMat;
-             
-             // Animated Fill ring based on progress
-             const fill = BABYLON.MeshBuilder.CreateCylinder("zone_fill", {diameter: zone.radius * 2, height: 0.2}, scene);
-             fill.position.set(zone.x, 0.06, zone.z);
-             const fillMat = new BABYLON.StandardMaterial("zone_fill_mat", scene);
-             fillMat.alpha = 0.5;
-             fillMat.emissiveColor = new BABYLON.Color3(0.5,0.5,0.5);
-             fill.material = fillMat;
-             fill.scaling.set(0.01, 1, 0.01); // starts empty
-
-             zone.onChange(() => {
-                 updateZonesHUD(room.state.zones);
-                 
-                 // Recolor base matching owner
-                 if(zone.owner === "A") diskMat.diffuseColor = new BABYLON.Color3(0.2,0.5,1);
-                 else if(zone.owner === "B") diskMat.diffuseColor = new BABYLON.Color3(1,0.2,0.2);
-                 else diskMat.diffuseColor = new BABYLON.Color3(0.5,0.5,0.5);
-                 
-                 // Recolor fill matching capturer team
-                 let cColor = new BABYLON.Color3(0.5,0.5,0.5);
-                 if(zone.capturingTeam === "A") cColor = new BABYLON.Color3(0.2,0.5,1.0);
-                 else if(zone.capturingTeam === "B") cColor = new BABYLON.Color3(1.0,0.2,0.2);
-                 fillMat.emissiveColor = cColor;
-                 fillMat.diffuseColor = cColor;
-                 
-                 // Update Scale representing capture progress (0 - 100%)
-                 const p = Math.max(0.01, zone.captureProgress / 100);
-                 fill.scaling.set(p, 1, p);
-             });
+            });
         });
 
         const updateHUD = () => {
@@ -357,7 +373,7 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
             }
         };
 
-        room.state.onChange(() => {
+        room.onStateChange(() => {
              updateHUD();
         });
 
@@ -412,4 +428,4 @@ window.addEventListener('resize', () => {
     engine.resize();
 });
 
-connectColyseus(scene, camera);
+// Game waits for user to click "Play" to connect
