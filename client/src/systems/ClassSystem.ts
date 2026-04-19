@@ -50,7 +50,7 @@ export class ClassSystem {
             const isLocked = this.currentPlayerLevel < c.unlockLevel;
             
             html += `
-                <div class="class-card ${isLocked ? 'locked' : ''}" ${!isLocked ? `onclick="window.selectClass('${key}')"` : ''}>
+                <div class="class-card ${isLocked ? 'locked' : ''}" data-class="${key}">
                     <h3>${c.name}</h3>
                     <p>HP: ${c.maxHp}</p>
                     <p>DMG: ${c.damage}</p>
@@ -62,11 +62,16 @@ export class ClassSystem {
         html += `</div>`;
         this.uiElement.innerHTML = html;
 
-        (window as any).selectClass = (key: string) => {
-            if (this.currentPlayerLevel >= CLASS_CONFIG[key].unlockLevel) {
-                 this.selectClass(key);
-            }
-        };
+        // Add event listeners to all cards
+        const cards = this.uiElement.querySelectorAll('.class-card');
+        cards.forEach(card => {
+            card.addEventListener('click', () => {
+                const classKey = (card as HTMLElement).dataset.class;
+                if (classKey && this.currentPlayerLevel >= CLASS_CONFIG[classKey].unlockLevel) {
+                    this.selectClass(classKey);
+                }
+            });
+        });
     }
 
     private selectClass(key: string) {
