@@ -61,6 +61,13 @@ export class MovementSystem {
     public applyClassProfile(className: string) {
         const config = CLASS_CONFIG[className] || CLASS_CONFIG["Infantry"];
         this.targetSpeed = this.baseSpeed * config.speedMultiplier;
+        
+        // Dynamic Scaling
+        this.body.scaling.setAll(config.scale);
+        
+        // Adjust camera offset for larger players if needed
+        const scale = config.scale;
+        this.camera.position = new BABYLON.Vector3(1.0 * scale, 3.5 * scale, -5.0 * scale);
     }
 
     private setupInputs() {

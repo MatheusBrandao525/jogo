@@ -9,6 +9,7 @@ export class ClassSystem {
     private currentClass: string = "Infantry";
     private currentPlayerLevel: number = 1;
     public isMenuOpen: boolean = false;
+    private isCountingDown: boolean = false;
 
     constructor(uiId: string, shootingSystem: ShootingSystem) {
         this.uiElement = document.getElementById(uiId) as HTMLElement;
@@ -33,6 +34,7 @@ export class ClassSystem {
     }
 
     show() {
+        this.setupUI(); // Refresh cards
         this.isMenuOpen = true;
         this.uiElement.style.display = "flex";
         document.exitPointerLock();
@@ -44,13 +46,16 @@ export class ClassSystem {
     }
 
     private setupUI() {
+        if (this.isCountingDown) return;
         let html = `<h2>Select Class</h2><div style="display:flex;gap:20px;justify-content:center;margin-top:20px;">`;
         Object.keys(CLASS_CONFIG).forEach(key => {
             const c = CLASS_CONFIG[key];
             const isLocked = this.currentPlayerLevel < c.unlockLevel;
+            const isCurrent = this.currentClass === key;
             
             html += `
-                <div class="class-card ${isLocked ? 'locked' : ''}" data-class="${key}">
+                <div class="class-card ${isLocked ? 'locked' : ''} ${isCurrent ? 'current' : ''}" data-class="${key}">
+                    ${isCurrent ? '<div class="current-label">Active</div>' : ''}
                     <h3>${c.name}</h3>
                     <p>HP: ${c.maxHp}</p>
                     <p>DMG: ${c.damage}</p>
@@ -76,6 +81,7 @@ export class ClassSystem {
 
     private selectClass(key: string) {
         if (!CLASS_CONFIG[key] || !this.room) return;
+        
         this.currentClass = key;
         
         // Notify server
@@ -83,6 +89,46 @@ export class ClassSystem {
         
         // Update local shooting profile immediately
         this.shootingSystem.applyClassProfile(CLASS_CONFIG[key]);
-        this.hide();
+
+        // Countdown Logic
+        this.startCountdown();
+    }
+
+    private startCountdown() {
+        this.isCountingDown = true;
+        
+        // Clear previous UI and show countdown
+        this.uiElement.innerHTML = `
+            <div style="font-size: 48px; font-weight: bold; text-transform: uppercase; letter-spacing: 5px; color: white;">
+                Deploying in...
+                <div id="deploymentTimer" style="font-size: 120px; color: #2ecc71; margin-top: 20px;">3</div>
+            </div>
+        `;
+
+        let timeLeft = 3;
+        const timerEl = document.getElementById("deploymentTimer");
+        
+        const interval = setInterval(() => {
+            if (!this.isMenuOpen) {
+                clearInterval(interval);
+                this.isCountingDown = false;
+                return;
+            }
+
+            timeLeft--;
+            if (timerEl) timerEl.innerText = Math.max(0, timeLeft).toString();
+            
+            if (timeLeft <= 0) {
+                clearInterval(interval);
+                this.isCountingDown = false;
+                this.hide();
+                
+                // Trigger pointer lock
+                const canvas = document.getElementById("renderCanvas");
+                if (canvas) {
+                    canvas.requestPointerLock();
+                }
+            }
+        }, 1000);
     }
 }

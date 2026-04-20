@@ -199,7 +199,9 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
     try {
         room = await client.joinOrCreate<BattleState>("battle", { userId: storedUserId });
         myPlayerId = room.sessionId;
+        
         shootingSystem.setRoom(room);
+        classSystem.setRoom(room);
 
         room.onMessage("level_up", (data: { level: number }) => {
             progressionSystem.triggerLevelUp(data.level);
@@ -227,7 +229,6 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                     movementSystem.body.position.z = player.z;
                     
                     healthSystem.updateHealth(player.hp, player.isDead);
-                    classSystem.setRoom(room);
                     minimapSystem.setContext(room, myPlayerId, myTeam);
 
                     // Show HUD elements
@@ -237,13 +238,34 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                     // Initial UI pass
                     classSystem.setPlayerLevel(player.level);
                     progressionSystem.updateUI(player.level, player.xp);
+                    
+                    // Create local character visual if it doesn't exist
+                    let localVisual: BABYLON.Node | null = null;
+                    const setupLocalVisual = () => {
+                        if (localVisual) localVisual.dispose();
+                        localVisual = CharacterRenderer.createLowPolyCharacter(scene, "local", player.team, player.classType, envSystem.assetManager);
+                        localVisual.parent = movementSystem.body;
+                        localVisual.position.y = -1.1;
+                        movementSystem.body.isVisible = false; // Hide the capsule collider
+                    };
+                    setupLocalVisual();
 
                     player.onChange(() => {
                         healthSystem.updateHealth(player.hp, player.isDead);
                         classSystem.setPlayerLevel(player.level);
                         progressionSystem.updateUI(player.level, player.xp);
                         movementSystem.applyClassProfile(player.classType);
+                        shootingSystem.updateGunVisual(player.classType);
+                        
+                        // If class changed, update visual
+                        if (player.classType !== (localVisual as any)?.metadata?.classType) {
+                             setupLocalVisual();
+                             if (localVisual) (localVisual as any).metadata = { classType: player.classType };
+                        }
                     });
+
+                    // Auto-show menu on initial spawn/join
+                    classSystem.show();
 
                 } else {
                     const { mesh, marker } = createPlayerMesh(scene, sessionId, player.team, player.classType);
@@ -391,10 +413,14 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
         });
 
         // Show class menu on connect and via 'C'
-        classSystem.show();
         window.addEventListener('keydown', (e) => {
             if (e.key === 'c' || e.key === 'C') {
-                classSystem.show();
+                if (classSystem.isMenuOpen) {
+                    classSystem.hide();
+                    engine.enterPointerlock();
+                } else {
+                    classSystem.show();
+                }
             }
         });
 
