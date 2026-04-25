@@ -29,12 +29,81 @@ html, body {
   position: absolute;
   top: 50%;
   left: 50%;
+  width: 64px;
+  height: 64px;
+  transform: translate(-50%, -50%);
+  --move-spread: 0px;
+  --recoil-spread: 0px;
+  --crosshair-spread: calc(8px + var(--move-spread) + var(--recoil-spread));
+  pointer-events: none;
+  z-index: 80;
+}
+
+.crosshair-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   width: 4px;
   height: 4px;
-  background-color: white;
   border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 5px rgba(0,0,0,0.7), 0 0 8px rgba(255,255,255,0.25);
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 2px rgba(0,0,0,0.5);
+}
+
+.crosshair-line {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: rgba(245, 250, 255, 0.9);
+  border-radius: 2px;
+  box-shadow: 0 0 4px rgba(0,0,0,0.75);
+  transition: transform 90ms ease-out, background 90ms ease-out, opacity 90ms ease-out;
+}
+
+.crosshair-line-top,
+.crosshair-line-bottom {
+  width: 2px;
+  height: 13px;
+}
+
+.crosshair-line-left,
+.crosshair-line-right {
+  width: 13px;
+  height: 2px;
+}
+
+.crosshair-line-top {
+  transform: translate(-50%, calc(-100% - var(--crosshair-spread)));
+}
+
+.crosshair-line-right {
+  transform: translate(var(--crosshair-spread), -50%);
+}
+
+.crosshair-line-bottom {
+  transform: translate(-50%, var(--crosshair-spread));
+}
+
+.crosshair-line-left {
+  transform: translate(calc(-100% - var(--crosshair-spread)), -50%);
+}
+
+.crosshair.moving .crosshair-line {
+  opacity: 0.82;
+}
+
+.crosshair.sprinting .crosshair-line {
+  opacity: 0.68;
+}
+
+.crosshair.shooting .crosshair-line {
+  background: rgba(255, 220, 120, 0.95);
+}
+
+.crosshair.hit .crosshair-dot,
+.crosshair.hit .crosshair-line {
+  background: rgba(255, 70, 70, 0.98);
 }
 
 /* Minimap */

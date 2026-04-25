@@ -5,7 +5,8 @@ export class EnvironmentSystem {
     private scene: BABYLON.Scene;
     public shadowGenerator: BABYLON.ShadowGenerator | null = null;
     private wallMaterial: BABYLON.StandardMaterial;
-    private assetManager: AssetManager;
+    public assetManager: AssetManager;
+    private collisionMaterial: BABYLON.StandardMaterial;
 
     constructor(scene: BABYLON.Scene) {
         this.scene = scene;
@@ -14,6 +15,9 @@ export class EnvironmentSystem {
         this.wallMaterial = new BABYLON.StandardMaterial("wallMat", scene);
         this.wallMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.45);
         this.wallMaterial.specularColor = BABYLON.Color3.Black();
+
+        this.collisionMaterial = new BABYLON.StandardMaterial("collisionProxyMat", scene);
+        this.collisionMaterial.alpha = 0;
 
         this.setupAtmosphere();
         this.setupLighting();
@@ -189,30 +193,40 @@ export class EnvironmentSystem {
         this.createBasePlate(120, 0, new BABYLON.Color3(0.9, 0.2, 0.2));
         
         // Base Buildings
-        this.assetManager.spawnInstance("base_struct", -125, 0, 0, Math.PI/2, 1, this.shadowGenerator!);
-        this.assetManager.spawnInstance("base_struct", 125, 0, 0, -Math.PI/2, 1, this.shadowGenerator!);
+        this.assetManager.spawnInstance("base_struct", -125, 0, 0, Math.PI/2, 1, this.shadowGenerator!, false);
+        this.createCollisionBox("base_a", -125, 0, 0, 12, 8, 12, Math.PI / 2);
+        this.assetManager.spawnInstance("base_struct", 125, 0, 0, -Math.PI/2, 1, this.shadowGenerator!, false);
+        this.createCollisionBox("base_b", 125, 0, 0, 12, 8, 12, -Math.PI / 2);
 
         // Outposts on flanks
-        this.assetManager.spawnInstance("outpost", 0, 0, 80, 0, 1, this.shadowGenerator!);
-        this.assetManager.spawnInstance("outpost", 0, 0, -80, 0, 1, this.shadowGenerator!);
+        this.assetManager.spawnInstance("outpost", 0, 0, 80, 0, 1, this.shadowGenerator!, false);
+        this.createCollisionBox("outpost_north", 0, 0, 80, 8, 6, 8);
+        this.assetManager.spawnInstance("outpost", 0, 0, -80, 0, 1, this.shadowGenerator!, false);
+        this.createCollisionBox("outpost_south", 0, 0, -80, 8, 6, 8);
 
         // Frontline trenches with real models
         for (let i = -40; i <= 40; i += 15) {
             if (Math.abs(i) < 5) continue;
-            this.assetManager.spawnInstance("trench", -30, 0, i, 0, 1, this.shadowGenerator!);
-            this.assetManager.spawnInstance("trench", 30, 0, i, 0, 1, this.shadowGenerator!);
+            this.assetManager.spawnInstance("trench", -30, 0, i, 0, 1, this.shadowGenerator!, false);
+            this.createCollisionBox("trench_left_" + i, -30, 0, i, 5.5, 2.4, 2.2);
+            this.assetManager.spawnInstance("trench", 30, 0, i, 0, 1, this.shadowGenerator!, false);
+            this.createCollisionBox("trench_right_" + i, 30, 0, i, 5.5, 2.4, 2.2);
         }
         
         // Mid-field cover
         for(let i=0; i<5; i++) {
             const rX = (Math.random() - 0.5) * 10;
             const rZ = (Math.random() - 0.5) * 40;
-            this.assetManager.spawnInstance("barrel", rX, 0, rZ, 0, 1, this.shadowGenerator!);
-            this.assetManager.spawnInstance("crate", rX + 2, 0, rZ + 2, 0, 1, this.shadowGenerator!);
+            this.assetManager.spawnInstance("barrel", rX, 0, rZ, 0, 1, this.shadowGenerator!, false);
+            this.createCollisionCylinder("barrel_" + i, rX, rZ, 0.75, 2.0);
+            this.assetManager.spawnInstance("crate", rX + 2, 0, rZ + 2, 0, 1, this.shadowGenerator!, false);
+            this.createCollisionBox("crate_" + i, rX + 2, 0, rZ + 2, 1.8, 1.8, 1.8);
         }
         
-        this.assetManager.spawnInstance("metal_fence", 0, 0, 15, Math.PI/2, 1, this.shadowGenerator!);
-        this.assetManager.spawnInstance("metal_fence", 0, 0, -15, Math.PI/2, 1, this.shadowGenerator!);
+        this.assetManager.spawnInstance("metal_fence", 0, 0, 15, Math.PI/2, 1, this.shadowGenerator!, false);
+        this.createCollisionBox("mid_fence_north", 0, 0, 15, 10, 2.4, 0.8, Math.PI / 2);
+        this.assetManager.spawnInstance("metal_fence", 0, 0, -15, Math.PI/2, 1, this.shadowGenerator!, false);
+        this.createCollisionBox("mid_fence_south", 0, 0, -15, 10, 2.4, 0.8, Math.PI / 2);
 
 
         // --- 3. External Asset Integration ---
@@ -222,23 +236,28 @@ export class EnvironmentSystem {
             const radius = 135 + Math.random() * 5;
             const x = Math.cos(angle) * radius;
             const z = Math.sin(angle) * radius;
-            this.assetManager.spawnInstance("cliff", x, 0, z, angle + Math.PI/2, Math.random() * 0.4 + 0.8, this.shadowGenerator!);
+            this.assetManager.spawnInstance("cliff", x, 0, z, angle + Math.PI/2, Math.random() * 0.4 + 0.8, this.shadowGenerator!, false);
+            this.createCollisionBox("cliff_" + i, x, 0, z, 12, 6, 4, angle + Math.PI / 2);
         }
 
         // Cover Rocks around Capture Zones and Procedural Hills
         // Near Center (0, 0)
-        this.assetManager.spawnInstance("rock", -10, 0, -5, Math.random() * Math.PI, 1, this.shadowGenerator!);
-        this.assetManager.spawnInstance("rock", 10, 0, 5, Math.random() * Math.PI, 1.2, this.shadowGenerator!);
+        this.assetManager.spawnInstance("rock", -10, 0, -5, Math.random() * Math.PI, 1, this.shadowGenerator!, false);
+        this.createCollisionCylinder("rock_center_a", -10, -5, 1.5, 2.8);
+        this.assetManager.spawnInstance("rock", 10, 0, 5, Math.random() * Math.PI, 1.2, this.shadowGenerator!, false);
+        this.createCollisionCylinder("rock_center_b", 10, 5, 1.8, 3.1);
         
         // Flank Rocks integrated into procedural hills perfectly
-        this.assetManager.spawnInstance("rock", -20, 0, -40, Math.random() * Math.PI, 1.5, this.shadowGenerator!);
-        this.assetManager.spawnInstance("rock", 20, 0, 40, Math.random() * Math.PI, 1.5, this.shadowGenerator!);
+        this.assetManager.spawnInstance("rock", -20, 0, -40, Math.random() * Math.PI, 1.5, this.shadowGenerator!, false);
+        this.createCollisionCylinder("rock_flank_a", -20, -40, 2.2, 3.4);
+        this.assetManager.spawnInstance("rock", 20, 0, 40, Math.random() * Math.PI, 1.5, this.shadowGenerator!, false);
+        this.createCollisionCylinder("rock_flank_b", 20, 40, 2.2, 3.4);
 
         // Small Props scattered selectively near trenches (immersion detailing)
-        this.assetManager.spawnInstance("prop", -18, 0, -17, 0, 1, this.shadowGenerator!);
-        this.assetManager.spawnInstance("prop", -19, 0, -17, 0, 1, this.shadowGenerator!);
-        this.assetManager.spawnInstance("prop", 22, 0, 17, 0, 1, this.shadowGenerator!);
-        this.assetManager.spawnInstance("prop", 5, 0, 12, 0, 1, this.shadowGenerator!);
+        this.assetManager.spawnInstance("prop", -18, 0, -17, 0, 1, this.shadowGenerator!, false);
+        this.assetManager.spawnInstance("prop", -19, 0, -17, 0, 1, this.shadowGenerator!, false);
+        this.assetManager.spawnInstance("prop", 22, 0, 17, 0, 1, this.shadowGenerator!, false);
+        this.assetManager.spawnInstance("prop", 5, 0, 12, 0, 1, this.shadowGenerator!, false);
         
         this.placeForests();
         this.placeGrass();
@@ -270,6 +289,7 @@ export class EnvironmentSystem {
             grass.position.set(x, 0.1, z);
             grass.rotation.y = Math.random() * Math.PI;
             grass.material = grassMat;
+            grass.metadata = { assetName: "grass_model" };
             grass.freezeWorldMatrix(); // optimization
         }
     }
@@ -283,8 +303,9 @@ export class EnvironmentSystem {
                  const offset = (i - (numFences-1)/2) * 3;
                  const fx = x + Math.cos(rotation) * offset;
                  const fz = z + Math.sin(rotation) * offset;
-                 this.assetManager.spawnInstance("fence", fx, 0, fz, rotation, 1, this.shadowGenerator!);
+                 this.assetManager.spawnInstance("fence", fx, 0, fz, rotation, 1, this.shadowGenerator!, false);
              }
+             this.createCollisionBox("fence_wall_" + x + "_" + z, x, 0, z, w, h, Math.max(d, 0.8), rotation);
         } else {
             const wall = BABYLON.MeshBuilder.CreateBox("wall", {width: w, height: h, depth: d}, this.scene);
             wall.position.set(x, h/2, z);
@@ -297,9 +318,60 @@ export class EnvironmentSystem {
     }
 
     private createHill(x: number, z: number, diameter: number, height: number) {
-        const hill = BABYLON.MeshBuilder.CreateSphere("hill", {diameter: diameter, segments: 16}, this.scene);
-        hill.scaling.y = height / diameter;
-        hill.position.set(x, 0, z);
+        const radius = diameter / 2;
+        const radialSegments = 18;
+        const rings = 8;
+        const positions: number[] = [];
+        const indices: number[] = [];
+
+        positions.push(x, height, z);
+
+        for (let ring = 1; ring <= rings; ring++) {
+            const t = ring / rings;
+            const ringRadius = radius * t;
+            const y = height * Math.cos(t * Math.PI * 0.5);
+
+            for (let segment = 0; segment < radialSegments; segment++) {
+                const angle = (segment / radialSegments) * Math.PI * 2;
+                positions.push(
+                    x + Math.cos(angle) * ringRadius,
+                    y,
+                    z + Math.sin(angle) * ringRadius
+                );
+            }
+        }
+
+        for (let segment = 0; segment < radialSegments; segment++) {
+            const next = (segment + 1) % radialSegments;
+            indices.push(0, 1 + segment, 1 + next);
+        }
+
+        for (let ring = 1; ring < rings; ring++) {
+            const currentStart = 1 + (ring - 1) * radialSegments;
+            const nextStart = 1 + ring * radialSegments;
+
+            for (let segment = 0; segment < radialSegments; segment++) {
+                const next = (segment + 1) % radialSegments;
+                const a = currentStart + segment;
+                const b = currentStart + next;
+                const c = nextStart + segment;
+                const d = nextStart + next;
+
+                indices.push(a, c, b);
+                indices.push(b, c, d);
+            }
+        }
+
+        const normals: number[] = [];
+        BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+
+        const hill = new BABYLON.Mesh("hill", this.scene);
+        const vertexData = new BABYLON.VertexData();
+        vertexData.positions = positions;
+        vertexData.indices = indices;
+        vertexData.normals = normals;
+        vertexData.applyToMesh(hill);
+
         const mat = new BABYLON.StandardMaterial("hillMat", this.scene);
         mat.diffuseColor = new BABYLON.Color3(0.3, 0.4, 0.25);
         mat.specularColor = BABYLON.Color3.Black();
@@ -307,6 +379,54 @@ export class EnvironmentSystem {
         hill.checkCollisions = true;
         hill.receiveShadows = true;
         if (this.shadowGenerator) this.shadowGenerator.addShadowCaster(hill);
+
+        const skirtPositions: number[] = [];
+        const skirtIndices: number[] = [];
+        const outerStart = 1 + (rings - 1) * radialSegments;
+        const skirtDepth = 2;
+
+        for (let segment = 0; segment < radialSegments; segment++) {
+            const topIndex = outerStart + segment;
+            skirtPositions.push(
+                positions[topIndex * 3],
+                positions[topIndex * 3 + 1],
+                positions[topIndex * 3 + 2]
+            );
+        }
+
+        for (let segment = 0; segment < radialSegments; segment++) {
+            const angle = (segment / radialSegments) * Math.PI * 2;
+            skirtPositions.push(
+                x + Math.cos(angle) * (radius + 0.5),
+                -skirtDepth,
+                z + Math.sin(angle) * (radius + 0.5)
+            );
+        }
+
+        for (let segment = 0; segment < radialSegments; segment++) {
+            const next = (segment + 1) % radialSegments;
+            const a = segment;
+            const b = next;
+            const c = radialSegments + segment;
+            const d = radialSegments + next;
+
+            skirtIndices.push(a, c, b);
+            skirtIndices.push(b, c, d);
+        }
+
+        const skirtNormals: number[] = [];
+        BABYLON.VertexData.ComputeNormals(skirtPositions, skirtIndices, skirtNormals);
+
+        const skirt = new BABYLON.Mesh("hill_skirt", this.scene);
+        const skirtData = new BABYLON.VertexData();
+        skirtData.positions = skirtPositions;
+        skirtData.indices = skirtIndices;
+        skirtData.normals = skirtNormals;
+        skirtData.applyToMesh(skirt);
+        skirt.material = mat;
+        skirt.checkCollisions = false;
+        skirt.isPickable = false;
+        skirt.receiveShadows = true;
     }
 
     private createBasePlate(x: number, z: number, color: BABYLON.Color3) {
@@ -325,8 +445,8 @@ export class EnvironmentSystem {
         this.createWall(x - 10, z - 10, 6, 3, 1, Math.PI / 4);
 
         // Scatter 2 props near each base
-        this.assetManager.spawnInstance("prop", x + 5, 0, z - 2, 0, 1, this.shadowGenerator!);
-        this.assetManager.spawnInstance("prop", x - 6, 0, z + 3, 0, 1, this.shadowGenerator!);
+        this.assetManager.spawnInstance("prop", x + 5, 0, z - 2, 0, 1, this.shadowGenerator!, false);
+        this.assetManager.spawnInstance("prop", x - 6, 0, z + 3, 0, 1, this.shadowGenerator!, false);
     }
 
     private placeForests() {
@@ -357,7 +477,8 @@ export class EnvironmentSystem {
                 
                 // Randomize tree variety if we had multiple variants loaded
                 const assetType = Math.random() > 0.4 ? "tree" : "conifer";
-                this.assetManager.spawnInstance(assetType, x, 0, z, rotY, scale, this.shadowGenerator!);
+                this.assetManager.spawnInstance(assetType, x, 0, z, rotY, scale, this.shadowGenerator!, false);
+                this.createCollisionCylinder(assetType + "_" + i + "_" + j, x, z, assetType === "tree" ? 0.55 * scale : 0.45 * scale, 5.5 * scale);
                 
                 // Add some bushes at base
                 if(Math.random() > 0.6) {
@@ -375,7 +496,35 @@ export class EnvironmentSystem {
             const rotY = Math.random() * Math.PI * 2;
             const scale = 0.4 + Math.random() * 0.7;
             const assetType = Math.random() > 0.5 ? "tree" : "conifer";
-            this.assetManager.spawnInstance(assetType, x, -0.1, z, rotY, scale, this.shadowGenerator!);
+            this.assetManager.spawnInstance(assetType, x, -0.1, z, rotY, scale, this.shadowGenerator!, false);
+            this.createCollisionCylinder(assetType + "_lone_" + i, x, z, assetType === "tree" ? 0.55 * scale : 0.45 * scale, 5.5 * scale);
         }
+    }
+
+    private createCollisionBox(name: string, x: number, y: number, z: number, width: number, height: number, depth: number, rotationY: number = 0) {
+        const collider = BABYLON.MeshBuilder.CreateBox("collision_" + name, { width, height, depth }, this.scene);
+        collider.position.set(x, y + height / 2, z);
+        collider.rotation.y = rotationY;
+        this.setupCollisionProxy(collider);
+        return collider;
+    }
+
+    private createCollisionCylinder(name: string, x: number, z: number, radius: number, height: number) {
+        const collider = BABYLON.MeshBuilder.CreateCylinder("collision_" + name, {
+            diameter: radius * 2,
+            height,
+            tessellation: 12
+        }, this.scene);
+        collider.position.set(x, height / 2, z);
+        this.setupCollisionProxy(collider);
+        return collider;
+    }
+
+    private setupCollisionProxy(collider: BABYLON.Mesh) {
+        collider.isVisible = false;
+        collider.isPickable = false;
+        collider.checkCollisions = true;
+        collider.material = this.collisionMaterial;
+        collider.freezeWorldMatrix();
     }
 }

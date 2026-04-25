@@ -10,16 +10,20 @@ export class ShootingSystem {
     private COOLDOWN = 150; // default
     private hitMarkerEl: HTMLElement | null = null;
     private recoilMultiplier = 1.0;
+    private recoilKick = 0;
+    private triggerHeld = false;
     private muzzleLight: BABYLON.PointLight;
     private gunMesh: BABYLON.AbstractMesh | null = null;
     private assetManager: any | null = null;
     private impactParticles: BABYLON.ParticleSystem;
     private muzzleParticles: BABYLON.ParticleSystem;
+    private smokeParticles: BABYLON.ParticleSystem;
     private muzzleEmitter: BABYLON.AbstractMesh;
     private muzzleNode: BABYLON.TransformNode;
     private muzzleFlare: BABYLON.Mesh;
     private tracerPool: BABYLON.Mesh[] = [];
     private tracerMat: BABYLON.StandardMaterial;
+    private crosshairEl: HTMLElement | null = null;
 
     constructor(scene: BABYLON.Scene, camera: BABYLON.UniversalCamera) {
         this.scene = scene;
@@ -31,36 +35,44 @@ export class ShootingSystem {
         this.muzzleLight.intensity = 0;
 
         // Impact Particles
-        this.impactParticles = new BABYLON.ParticleSystem("impact", 200, this.scene);
-        this.impactParticles.particleTexture = new BABYLON.Texture("https://raw.githubusercontent.com/PatrickRyanMS/BabylonJS_Resources/master/ParticleUtils/textures/flare.png", this.scene);
+        const sparkTexture = this.createParticleTexture("sparkParticleTexture", "rgba(255, 235, 160, 1)");
+        const smokeTexture = this.createParticleTexture("smokeParticleTexture", "rgba(210, 220, 225, 0.55)");
+
+        this.impactParticles = new BABYLON.ParticleSystem("impact", 350, this.scene);
+        this.impactParticles.particleTexture = sparkTexture;
         this.impactParticles.emitter = BABYLON.Vector3.Zero();
-        this.impactParticles.minSize = 0.05;
-        this.impactParticles.maxSize = 0.15;
-        this.impactParticles.minLifeTime = 0.1;
-        this.impactParticles.maxLifeTime = 0.3;
+        this.impactParticles.minSize = 0.035;
+        this.impactParticles.maxSize = 0.16;
+        this.impactParticles.minLifeTime = 0.08;
+        this.impactParticles.maxLifeTime = 0.34;
         this.impactParticles.emitRate = 0;
         this.impactParticles.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
-        this.impactParticles.gravity = new BABYLON.Vector3(0, -9.81, 0);
+        this.impactParticles.gravity = new BABYLON.Vector3(0, -16, 0);
         this.impactParticles.direction1 = new BABYLON.Vector3(-1, 2, -1);
         this.impactParticles.direction2 = new BABYLON.Vector3(1, 4, 1);
-        this.impactParticles.minEmitPower = 1;
-        this.impactParticles.maxEmitPower = 3;
-        this.impactParticles.updateSpeed = 0.01;
+        this.impactParticles.minEmitPower = 3;
+        this.impactParticles.maxEmitPower = 8;
+        this.impactParticles.color1 = new BABYLON.Color4(1, 0.9, 0.35, 1);
+        this.impactParticles.color2 = new BABYLON.Color4(1, 0.28, 0.08, 1);
+        this.impactParticles.colorDead = new BABYLON.Color4(0.1, 0.08, 0.06, 0);
+        this.impactParticles.updateSpeed = 0.012;
         this.impactParticles.start();
 
         // Muzzle Node (Anchor point at barrel tip)
         this.muzzleNode = new BABYLON.TransformNode("muzzleNode", this.scene);
 
         // Muzzle Flash Spark Particles
-        this.muzzleEmitter = new BABYLON.AbstractMesh("muzzleEmitter", this.scene);
+        this.muzzleEmitter = BABYLON.MeshBuilder.CreateBox("muzzleEmitter", { size: 0.01 }, this.scene);
+        this.muzzleEmitter.isVisible = false;
+        this.muzzleEmitter.isPickable = false;
         this.muzzleEmitter.parent = this.muzzleNode;
-        this.muzzleParticles = new BABYLON.ParticleSystem("muzzle", 100, this.scene);
-        this.muzzleParticles.particleTexture = new BABYLON.Texture("https://raw.githubusercontent.com/PatrickRyanMS/BabylonJS_Resources/master/ParticleUtils/textures/flare.png", this.scene);
+        this.muzzleParticles = new BABYLON.ParticleSystem("muzzle", 180, this.scene);
+        this.muzzleParticles.particleTexture = sparkTexture;
         this.muzzleParticles.emitter = this.muzzleEmitter;
-        this.muzzleParticles.minSize = 0.02;
-        this.muzzleParticles.maxSize = 0.1;
-        this.muzzleParticles.minLifeTime = 0.05;
-        this.muzzleParticles.maxLifeTime = 0.2;
+        this.muzzleParticles.minSize = 0.025;
+        this.muzzleParticles.maxSize = 0.13;
+        this.muzzleParticles.minLifeTime = 0.04;
+        this.muzzleParticles.maxLifeTime = 0.16;
         this.muzzleParticles.emitRate = 0;
         this.muzzleParticles.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
         this.muzzleParticles.direction1 = new BABYLON.Vector3(-1, -1, -1);
@@ -69,7 +81,25 @@ export class ShootingSystem {
         this.muzzleParticles.maxEmitPower = 15;
         this.muzzleParticles.color1 = new BABYLON.Color4(1, 0.9, 0.4, 1);
         this.muzzleParticles.color2 = new BABYLON.Color4(1, 0.5, 0, 1);
+        this.muzzleParticles.colorDead = new BABYLON.Color4(0.35, 0.12, 0.02, 0);
         this.muzzleParticles.start();
+
+        this.smokeParticles = new BABYLON.ParticleSystem("shotSmoke", 160, this.scene);
+        this.smokeParticles.particleTexture = smokeTexture;
+        this.smokeParticles.emitter = this.muzzleEmitter;
+        this.smokeParticles.minSize = 0.12;
+        this.smokeParticles.maxSize = 0.45;
+        this.smokeParticles.minLifeTime = 0.18;
+        this.smokeParticles.maxLifeTime = 0.55;
+        this.smokeParticles.emitRate = 0;
+        this.smokeParticles.minEmitPower = 0.7;
+        this.smokeParticles.maxEmitPower = 2.2;
+        this.smokeParticles.color1 = new BABYLON.Color4(0.75, 0.76, 0.72, 0.42);
+        this.smokeParticles.color2 = new BABYLON.Color4(0.42, 0.43, 0.4, 0.24);
+        this.smokeParticles.colorDead = new BABYLON.Color4(0.3, 0.3, 0.3, 0);
+        this.smokeParticles.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+        this.smokeParticles.updateSpeed = 0.012;
+        this.smokeParticles.start();
 
         // Muzzle Flare (Small glowing sphere)
         this.muzzleFlare = BABYLON.MeshBuilder.CreateSphere("muzzleFlare", {diameter: 0.15}, this.scene);
@@ -89,6 +119,21 @@ export class ShootingSystem {
 
         // Initial fallback
         this.createGunMesh();
+        this.scene.onBeforeRenderObservable.add(() => this.update());
+    }
+
+    private createParticleTexture(name: string, color: string) {
+        const texture = new BABYLON.DynamicTexture(name, { width: 64, height: 64 }, this.scene, false);
+        const ctx = texture.getContext();
+        const gradient = ctx.createRadialGradient(32, 32, 1, 32, 32, 30);
+        gradient.addColorStop(0, color);
+        gradient.addColorStop(0.42, color);
+        gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.clearRect(0, 0, 64, 64);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 64, 64);
+        texture.update();
+        return texture;
     }
 
     public setAssetManager(am: any) {
@@ -253,6 +298,32 @@ export class ShootingSystem {
         this.hitMarkerEl = el;
     }
 
+    setCrosshairElement(el: HTMLElement) {
+        this.crosshairEl = el;
+    }
+
+    startFiring() {
+        this.triggerHeld = true;
+        this.shoot();
+    }
+
+    stopFiring() {
+        this.triggerHeld = false;
+    }
+
+    private update() {
+        const dt = Math.min(this.scene.getEngine().getDeltaTime() / 1000, 0.05);
+        this.recoilKick = BABYLON.Scalar.Lerp(this.recoilKick, 0, 1 - Math.exp(-9 * dt));
+
+        if (this.crosshairEl) {
+            this.crosshairEl.style.setProperty("--recoil-spread", `${Math.round(this.recoilKick * 34)}px`);
+        }
+
+        if (this.triggerHeld) {
+            this.shoot();
+        }
+    }
+
     shoot() {
         const now = Date.now();
         if (now - this.lastShootTime < this.COOLDOWN) return;
@@ -260,19 +331,21 @@ export class ShootingSystem {
         
         this.applyRecoil();
 
-        // New Logic: Create ray from mouse cursor (works for both locked and free mouse)
+        const isPointerLocked = document.pointerLockElement !== null;
+        const pickX = isPointerLocked ? this.scene.getEngine().getRenderWidth() * 0.5 : this.scene.pointerX;
+        const pickY = isPointerLocked ? this.scene.getEngine().getRenderHeight() * 0.5 : this.scene.pointerY;
+
+        // Create ray from center while aiming, or cursor while menus are open.
         const ray = this.scene.createPickingRay(
-            this.scene.pointerX, 
-            this.scene.pointerY, 
+            pickX, 
+            pickY, 
             BABYLON.Matrix.Identity(), 
             this.camera
         );
         
-        const hit = this.scene.pickWithRay(ray, (m) => {
-            return !m.name.includes("localPlayerBody") && m.isVisible;
-        });
+        const hit = this.scene.pickWithRay(ray, (m) => this.isShootableMesh(m));
 
-        const origin = this.camera.position;
+        const origin = this.camera.globalPosition;
         const forward = ray.direction; // Follow the ray direction
 
         // Resolve hit target
@@ -291,6 +364,7 @@ export class ShootingSystem {
         // Start tracer at the REAL muzzle
         this.createTracer(muzzlePos, targetPos, !!hitId);
         this.playMuzzleEffectAt(muzzlePos, targetPos);
+        this.pulseCrosshair();
         
         if (hit && hit.hit && hit.pickedPoint) {
             this.playImpactEffect(hit.pickedPoint, hit.getNormal(true));
@@ -307,9 +381,10 @@ export class ShootingSystem {
 
         let tracer = this.tracerPool.pop();
         if (!tracer) {
-            tracer = BABYLON.MeshBuilder.CreateBox("tracer", {width: 0.02, height: 0.02, depth: 1}, this.scene);
+            tracer = BABYLON.MeshBuilder.CreateBox("tracer", {width: 0.018, height: 0.018, depth: 1}, this.scene);
             tracer.material = this.tracerMat.clone("tracerInst");
             tracer.isPickable = false;
+            tracer.renderingGroupId = 1;
         }
 
         tracer.isVisible = true;
@@ -319,9 +394,9 @@ export class ShootingSystem {
 
         const mat = tracer.material as BABYLON.StandardMaterial;
         if (isHit) {
-            mat.emissiveColor = new BABYLON.Color3(1, 0.3, 0.3);
+            mat.emissiveColor = new BABYLON.Color3(1, 0.18, 0.12);
         } else {
-            mat.emissiveColor = new BABYLON.Color3(1, 0.9, 0.6);
+            mat.emissiveColor = new BABYLON.Color3(1, 0.82, 0.32);
         }
 
         setTimeout(() => {
@@ -332,30 +407,50 @@ export class ShootingSystem {
         }, 120);
     }
 
+    private isShootableMesh(mesh: BABYLON.AbstractMesh) {
+        if (mesh.name.includes("localPlayerBody") || mesh.name.startsWith("collision_") || !mesh.isVisible) {
+            return false;
+        }
+
+        const assetName = mesh.metadata?.assetName || (mesh.parent as BABYLON.Node | null)?.metadata?.assetName || "";
+        const meshName = mesh.name.toLowerCase();
+        const isSoftVegetation =
+            assetName === "grass_model" ||
+            assetName === "bush" ||
+            meshName.includes("grass") ||
+            meshName.includes("bush");
+
+        return !isSoftVegetation;
+    }
+
     private playImpactEffect(pos: BABYLON.Vector3, normal: BABYLON.Vector3 | null = null) {
         this.impactParticles.emitter = pos;
         
         if (normal) {
             // Use the surface normal to direct the impact sparks
             const spread = 0.6;
-            this.impactParticles.direction1 = normal.scale(3).subtract(new BABYLON.Vector3(spread, spread, spread));
-            this.impactParticles.direction2 = normal.scale(5).add(new BABYLON.Vector3(spread, spread, spread));
+            this.impactParticles.direction1 = normal.scale(5).subtract(new BABYLON.Vector3(spread, spread, spread));
+            this.impactParticles.direction2 = normal.scale(9).add(new BABYLON.Vector3(spread, spread, spread));
         } else {
             // Fallback to UP if no normal is available
             this.impactParticles.direction1 = new BABYLON.Vector3(-1, 2, -1);
             this.impactParticles.direction2 = new BABYLON.Vector3(1, 4, 1);
         }
 
-        this.impactParticles.manualEmitCount = 10;
+        this.impactParticles.manualEmitCount = 18;
+        this.smokeParticles.emitter = pos;
+        this.smokeParticles.direction1 = new BABYLON.Vector3(-0.4, 0.4, -0.4);
+        this.smokeParticles.direction2 = new BABYLON.Vector3(0.4, 1.2, 0.4);
+        this.smokeParticles.manualEmitCount = 5;
     }
 
     private applyRecoil() {
-        // Simple camera recoil offset (Dampened)
-        const recoilAmountX = (Math.random() - 0.5) * 0.01 * this.recoilMultiplier;
-        const recoilAmountY = -0.015 * this.recoilMultiplier; // kick up
+        const recoilAmountX = (Math.random() - 0.5) * 0.008 * this.recoilMultiplier;
+        const recoilAmountY = -0.012 * this.recoilMultiplier;
 
         this.camera.cameraRotation.x += recoilAmountY;
         this.camera.cameraRotation.y += recoilAmountX;
+        this.recoilKick = Math.min(1, this.recoilKick + 0.18 * this.recoilMultiplier);
     }
 
     private playMuzzleEffectAt(pos: BABYLON.Vector3, targetPos: BABYLON.Vector3) {
@@ -391,6 +486,10 @@ export class ShootingSystem {
         this.muzzleLight.intensity = 4.0;
         this.muzzleFlare.isVisible = true;
         this.muzzleParticles.manualEmitCount = 25;
+        this.smokeParticles.emitter = this.muzzleEmitter;
+        this.smokeParticles.direction1 = baseDir.scale(0.06).subtract(hSpread).subtract(vSpread);
+        this.smokeParticles.direction2 = baseDir.scale(0.12).add(hSpread).add(vSpread);
+        this.smokeParticles.manualEmitCount = 7;
         
         setTimeout(() => {
             if (this.muzzleLight) this.muzzleLight.intensity = 0;
@@ -404,7 +503,18 @@ export class ShootingSystem {
         // Trigger reflow
         void this.hitMarkerEl.offsetWidth;
         this.hitMarkerEl.classList.add("active");
+        this.crosshairEl?.classList.add("hit");
+        setTimeout(() => this.hitMarkerEl?.classList.remove("active"), 100);
+        setTimeout(() => this.crosshairEl?.classList.remove("hit"), 120);
 
         // Small audio ping could be added here
+    }
+
+    private pulseCrosshair() {
+        if (!this.crosshairEl) return;
+        this.crosshairEl.classList.remove("shooting");
+        void this.crosshairEl.offsetWidth;
+        this.crosshairEl.classList.add("shooting");
+        setTimeout(() => this.crosshairEl?.classList.remove("shooting"), 90);
     }
 }

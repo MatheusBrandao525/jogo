@@ -43,7 +43,13 @@ uiContainer.innerHTML = `
     <div id="fullscreenOverlay"></div>
     <div class="kill-feed" id="killFeed"></div>
     <div class="hit-marker" id="hitMarker"></div>
-    <div class="crosshair"></div>
+    <div class="crosshair" id="crosshair" aria-hidden="true">
+        <span class="crosshair-dot"></span>
+        <span class="crosshair-line crosshair-line-top"></span>
+        <span class="crosshair-line crosshair-line-right"></span>
+        <span class="crosshair-line crosshair-line-bottom"></span>
+        <span class="crosshair-line crosshair-line-left"></span>
+    </div>
     <canvas id="minimap" class="minimap" width="200" height="200"></canvas>
     
     <div class="hud-top" style="display:none;" id="hudTop">
@@ -92,13 +98,12 @@ const createScene = function () {
     
     // Environment & Atmosphere
     envSystem = new EnvironmentSystem(scene);
-    envSystem.initialize(); // Loads GLBs asynchronously
+    const environmentReady = envSystem.initialize(); // Loads GLBs asynchronously
 
     const camera = new BABYLON.UniversalCamera("camera1", new BABYLON.Vector3(0, 2, 0), scene);
     camera.minZ = 0.2; // Prevent near-clipping into large objects
-    camera.angularSensibilityX = 12000; // Increased for lower sensitivity
-    camera.angularSensibilityY = 12000;
-    camera.inertia = 0.82; // Smoother movement
+    camera.angularSensibility = 4500;
+    camera.inertia = 0.35;
     camera.setTarget(BABYLON.Vector3.Zero());
     camera.attachControl(canvas, true);
     
@@ -109,6 +114,7 @@ const createScene = function () {
     
     shootingSystem = new ShootingSystem(scene, camera);
     shootingSystem.setHitMarkerElement(document.getElementById("hitMarker") as HTMLElement);
+    shootingSystem.setCrosshairElement(document.getElementById("crosshair") as HTMLElement);
     
     // Pass asset manager to shooting system
     shootingSystem.setAssetManager(envSystem.assetManager);
@@ -118,14 +124,14 @@ const createScene = function () {
     minimapSystem = new MinimapSystem("minimap");
     
     // We update gun visual once assets are ready
-    envSystem.initialize().then(() => {
+    environmentReady.then(() => {
         shootingSystem.updateGunVisual(classSystem.activeClass);
     });
 
     scene.onPointerDown = (evt) => {
         if (evt.button === 0) engine.enterPointerlock();
         if (evt.button === 1) engine.exitPointerlock();
-        if (evt.button === 0) shootingSystem.shoot();
+        if (evt.button === 0) shootingSystem.startFiring();
         
         // Right Click Zoom logic for Sniper
         if (evt.button === 2 && classSystem.activeClass === "Sniper") {
@@ -134,6 +140,7 @@ const createScene = function () {
     };
 
     scene.onPointerUp = (evt) => {
+        if (evt.button === 0) shootingSystem.stopFiring();
         if (evt.button === 2) {
             camera.fov = 0.8; // Restore normal FOV
         }
@@ -165,6 +172,14 @@ const createScene = function () {
         } else {
             // Return to center slowly
             camera.position.y = BABYLON.Scalar.Lerp(camera.position.y, 0.8, 0.1);
+        }
+
+        const crosshair = document.getElementById("crosshair");
+        if (crosshair) {
+            const speedRatio = movementSystem.getHorizontalSpeedRatio();
+            crosshair.style.setProperty("--move-spread", `${Math.round(speedRatio * 18)}px`);
+            crosshair.classList.toggle("moving", speedRatio > 0.12);
+            crosshair.classList.toggle("sprinting", movementSystem.isSprinting());
         }
     });
 
@@ -228,9 +243,7 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
 
         room.onMessage("round_start", () => {
             // Teleport player body back to base
-            movementSystem.body.position.x = myTeam === "A" ? -100 : 100;
-            movementSystem.body.position.y = 2.4;
-            movementSystem.body.position.z = 0;
+            movementSystem.teleportToSpawn(myTeam === "A" ? -100 : 100, 0);
             camera.rotation.setAll(0);
         });
 
@@ -238,13 +251,11 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
         room.onStateChange.once((state: BattleState) => {
             console.log("Match State Synchronized", state);
             
-            state.players.onAdd((player: any, sessionId: string) => {
+            (state.players as any).onAdd((player: any, sessionId: string) => {
                 console.log("Player Joined:", sessionId, player.team);
                 if (sessionId === myPlayerId) {
                     myTeam = player.team;
-                    movementSystem.body.position.x = player.x;
-                    movementSystem.body.position.y = player.y + 1.1; 
-                    movementSystem.body.position.z = player.z;
+                    movementSystem.teleportToSpawn(player.x, player.z, player.y);
                     
                     healthSystem.updateHealth(player.hp, player.isDead);
                     minimapSystem.setContext(room, myPlayerId, myTeam);
@@ -254,8 +265,11 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
 
                     classSystem.setPlayerLevel(player.level);
                     progressionSystem.updateUI(player.level, player.xp);
+                    movementSystem.applyClassProfile(player.classType);
+                    shootingSystem.updateGunVisual(player.classType);
                     
-                    let localVisual: BABYLON.Node | null = null;
+                    let localVisual: BABYLON.AbstractMesh | null = null;
+                    let localClassType = player.classType;
                     const setupLocalVisual = () => {
                         if (localVisual) localVisual.dispose();
                         localVisual = CharacterRenderer.createLowPolyCharacter(scene, "local", player.team, player.classType, envSystem.assetManager);
@@ -270,10 +284,11 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                         healthSystem.updateHealth(player.hp, player.isDead);
                         classSystem.setPlayerLevel(player.level);
                         progressionSystem.updateUI(player.level, player.xp);
-                        movementSystem.applyClassProfile(player.classType);
-                        shootingSystem.updateGunVisual(player.classType);
                         
-                        if (player.classType !== (localVisual as any)?.metadata?.classType) {
+                        if (player.classType !== localClassType) {
+                             localClassType = player.classType;
+                             movementSystem.applyClassProfile(player.classType);
+                             shootingSystem.updateGunVisual(player.classType);
                              setupLocalVisual();
                              if (localVisual) (localVisual as any).metadata = { classType: player.classType };
                         }
@@ -306,7 +321,7 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                 }
             });
 
-            state.players.onRemove((_player: any, sessionId: string) => {
+            (state.players as any).onRemove((_player: any, sessionId: string) => {
                 if (players[sessionId]) {
                     players[sessionId].mesh.dispose();
                     players[sessionId].marker.dispose();
@@ -314,7 +329,7 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                 }
             });
 
-            state.zones.onAdd((zone: any, _key: string) => {
+            (state.zones as any).onAdd((zone: any, _key: string) => {
                 updateZonesHUD(state.zones);
             // ... (rest of zone logic)
                 updateZonesHUD(room.state.zones);
@@ -416,7 +431,7 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
             if (room && myPlayerId && movementSystem) {
                 room.send("move", {
                     x: movementSystem.body.position.x,
-                    y: Math.max(0, movementSystem.body.position.y - 1.1), // Send foot level relative to schema
+                    y: movementSystem.getNetworkFootY(), // Send foot level relative to schema
                     z: movementSystem.body.position.z,
                     rotX: camera.rotation.x,
                     rotY: camera.rotation.y
@@ -431,6 +446,7 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                     classSystem.hide();
                     engine.enterPointerlock();
                 } else {
+                    shootingSystem.stopFiring();
                     classSystem.show();
                 }
             }

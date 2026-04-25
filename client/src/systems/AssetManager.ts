@@ -66,10 +66,12 @@ export class AssetManager {
         instance.position.set(x, y, z);
         instance.rotation = new BABYLON.Vector3(0, rotationY, 0);
         instance.scaling.setAll(sizeMultiplier);
+        instance.metadata = { ...(instance.metadata || {}), assetName: name };
         
         instance.getChildMeshes().forEach(child => {
             child.isVisible = true;
             child.checkCollisions = enableCollisions;
+            child.metadata = { ...(child.metadata || {}), assetName: name };
             if (shadowGen) shadowGen.addShadowCaster(child);
         });
 
