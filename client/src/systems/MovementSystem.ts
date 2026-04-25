@@ -8,8 +8,10 @@ export class MovementSystem {
 
     // Movement Properties
     private velocity = BABYLON.Vector3.Zero();
-    private baseSpeed = 0.13; // Approx 7.8 units per second at 60fps
-    private targetSpeed = 0.13;
+    private baseSpeed = 0.55; // Increased further for world scale
+    private targetSpeed = 0.55;
+    private sprintMultiplier = 1.3;
+    private currentTilt = 0;
 
     // Jumping & Gravity
     private isGrounded = true;
@@ -19,7 +21,7 @@ export class MovementSystem {
 
     // Inputs
     private keys: { [key: string]: boolean } = {
-        'w': false, 'a': false, 's': false, 'd': false, ' ': false
+        'w': false, 'a': false, 's': false, 'd': false, ' ': false, 'shift': false
     };
 
     constructor(scene: BABYLON.Scene, camera: BABYLON.UniversalCamera) {
@@ -40,13 +42,12 @@ export class MovementSystem {
         this.body.checkCollisions = true; 
         this.body.ellipsoid = new BABYLON.Vector3(0.4, 0.9, 0.4);
         this.body.ellipsoidOffset = new BABYLON.Vector3(0, 0, 0);
-        this.body.isVisible = true; // Third person: show own body
-
-        // Parent camera to body with Third Person Offset
+        this.body.isVisible = false; // First person: hide own body capsule
+        
+        // Parent camera to body for First Person
         this.camera.parent = this.body;
-        // Over-the-shoulder look: slightly behind, up, and to the side
-        this.camera.position = new BABYLON.Vector3(1.0, 3.5, -5.0);
-        this.camera.setTarget(new BABYLON.Vector3(0, 1.5, 2));
+        this.camera.position = new BABYLON.Vector3(0, 0.8, 0); // Head level relative to capsule center
+        this.camera.setTarget(new BABYLON.Vector3(0, 0.8, 1)); // Look forward
 
         // Anti-sticking: Dampen velocity if we hit something
         this.body.onCollide = () => {
@@ -67,7 +68,7 @@ export class MovementSystem {
         
         // Adjust camera offset for larger players if needed
         const scale = config.scale;
-        this.camera.position = new BABYLON.Vector3(1.0 * scale, 3.5 * scale, -5.0 * scale);
+        this.camera.position = new BABYLON.Vector3(0, 0.8, 0);
     }
 
     private setupInputs() {
@@ -112,10 +113,22 @@ export class MovementSystem {
 
         if (moveDir.length() > 0) moveDir.normalize();
 
-        // Smooth Acceleration Phase
-        const desiredVelocity = moveDir.scale(this.targetSpeed);
-        this.velocity.x = BABYLON.Scalar.Lerp(this.velocity.x, desiredVelocity.x, 0.15);
-        this.velocity.z = BABYLON.Scalar.Lerp(this.velocity.z, desiredVelocity.z, 0.15);
+        // Sprinting logic
+        let speed = this.targetSpeed;
+        if (this.keys['shift'] && this.keys['w']) speed *= this.sprintMultiplier;
+
+        // Smooth Acceleration Phase (Increased fluidity)
+        const desiredVelocity = moveDir.scale(speed);
+        const acceleration = this.isGrounded ? 0.12 : 0.02; // Less control in air
+        this.velocity.x = BABYLON.Scalar.Lerp(this.velocity.x, desiredVelocity.x, acceleration);
+        this.velocity.z = BABYLON.Scalar.Lerp(this.velocity.z, desiredVelocity.z, acceleration);
+
+        // Realism: Strafe Tilt
+        let targetTilt = 0;
+        if (this.keys['a']) targetTilt = 0.02;
+        if (this.keys['d']) targetTilt = -0.02;
+        this.currentTilt = BABYLON.Scalar.Lerp(this.currentTilt, targetTilt, 0.1);
+        this.camera.rotation.z = this.currentTilt;
 
         // Custom Gravity Phase (checks collisions cleanly preventing sticking)
         this.velocity.y += this.gravity;

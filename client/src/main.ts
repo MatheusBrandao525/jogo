@@ -96,8 +96,9 @@ const createScene = function () {
 
     const camera = new BABYLON.UniversalCamera("camera1", new BABYLON.Vector3(0, 2, 0), scene);
     camera.minZ = 0.2; // Prevent near-clipping into large objects
-    camera.angularSensibilityX = 5000;
-    camera.angularSensibilityY = 5000;
+    camera.angularSensibilityX = 12000; // Increased for lower sensitivity
+    camera.angularSensibilityY = 12000;
+    camera.inertia = 0.82; // Smoother movement
     camera.setTarget(BABYLON.Vector3.Zero());
     camera.attachControl(canvas, true);
     
@@ -144,13 +145,26 @@ const createScene = function () {
     let bodyPrePos = movementSystem.body.position.clone();
     
     scene.onBeforeRenderObservable.add(() => {
-        const dist = BABYLON.Vector3.Distance(movementSystem.body.position, bodyPrePos);
-        bodyPrePos.copyFrom(movementSystem.body.position);
+        const currentPos = movementSystem.body.position;
+        const dist = BABYLON.Vector3.Distance(currentPos, bodyPrePos);
+        bodyPrePos.copyFrom(currentPos);
 
-        if (dist > 0.05 && movementSystem.body.position.y <= 1.2) { // only bob if moving on ground
-            timeSeconds += engine.getDeltaTime() * 0.015;
-            camera.cameraRotation.x += Math.sin(timeSeconds) * 0.0015;
-            camera.cameraRotation.y += Math.cos(timeSeconds * 0.5) * 0.001;
+        const isMoving = dist > 0.02;
+        const isOnGround = movementSystem.body.position.y <= 2.5; // simple height check
+
+        if (isMoving && isOnGround) {
+            // Scale animation speed directly with distance traveled for perfect sync
+            // A lower factor (0.25) makes the stride feel longer and more realistic
+            timeSeconds += dist * 0.25; 
+            
+            // Vertical bobbing (slight increase in amplitude for feedback)
+            camera.position.y = 0.8 + Math.sin(timeSeconds * 2) * 0.05;
+            
+            // Subtle horizontal sway
+            camera.cameraRotation.y += Math.cos(timeSeconds) * 0.0006;
+        } else {
+            // Return to center slowly
+            camera.position.y = BABYLON.Scalar.Lerp(camera.position.y, 0.8, 0.1);
         }
     });
 
@@ -220,33 +234,35 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
             camera.rotation.setAll(0);
         });
 
-        room.onStateChange.once(() => {
-            room.state.players.onAdd((player: any, sessionId: string) => {
+        // Use onStateChange.once to ensure the schema is fully synchronized before attaching listeners
+        room.onStateChange.once((state: BattleState) => {
+            console.log("Match State Synchronized", state);
+            
+            state.players.onAdd((player: any, sessionId: string) => {
+                console.log("Player Joined:", sessionId, player.team);
                 if (sessionId === myPlayerId) {
                     myTeam = player.team;
                     movementSystem.body.position.x = player.x;
-                    movementSystem.body.position.y = player.y;
+                    movementSystem.body.position.y = player.y + 1.1; 
                     movementSystem.body.position.z = player.z;
                     
                     healthSystem.updateHealth(player.hp, player.isDead);
                     minimapSystem.setContext(room, myPlayerId, myTeam);
 
-                    // Show HUD elements
                     document.getElementById("hudTop")!.style.display = "flex";
                     document.getElementById("hudBottom")!.style.display = "block";
 
-                    // Initial UI pass
                     classSystem.setPlayerLevel(player.level);
                     progressionSystem.updateUI(player.level, player.xp);
                     
-                    // Create local character visual if it doesn't exist
                     let localVisual: BABYLON.Node | null = null;
                     const setupLocalVisual = () => {
                         if (localVisual) localVisual.dispose();
                         localVisual = CharacterRenderer.createLowPolyCharacter(scene, "local", player.team, player.classType, envSystem.assetManager);
                         localVisual.parent = movementSystem.body;
                         localVisual.position.y = -1.1;
-                        movementSystem.body.isVisible = false; // Hide the capsule collider
+                        localVisual.getChildMeshes().forEach(m => m.isVisible = false); // Hide all parts of own body
+                        movementSystem.body.isVisible = false; 
                     };
                     setupLocalVisual();
 
@@ -257,14 +273,12 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                         movementSystem.applyClassProfile(player.classType);
                         shootingSystem.updateGunVisual(player.classType);
                         
-                        // If class changed, update visual
                         if (player.classType !== (localVisual as any)?.metadata?.classType) {
                              setupLocalVisual();
                              if (localVisual) (localVisual as any).metadata = { classType: player.classType };
                         }
                     });
 
-                    // Auto-show menu on initial spawn/join
                     classSystem.show();
 
                 } else {
@@ -280,22 +294,19 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                                 players[sessionId].mesh.isVisible = true;
                                 players[sessionId].marker.isVisible = true;
                                 
-                                // Dynamic Scale updates based on Class changes
                                 const cnf = CLASS_CONFIG[player.classType] || CLASS_CONFIG["Infantry"];
                                 players[sessionId].mesh.scaling.setAll(cnf.scale);
 
-                                players[sessionId].mesh.position.set(player.x, player.y, player.z);
+                                players[sessionId].mesh.position.set(player.x, player.y + 1.1, player.z);
                                 players[sessionId].mesh.rotation.y = player.rotY;
-                                
-                                // Align marker directly above the player
-                                players[sessionId].marker.position.set(player.x, player.y + (1.8 * cnf.scale), player.z);
+                                players[sessionId].marker.position.set(player.x, player.y + (1.8 * cnf.scale) + 1.1, player.z);
                             }
                         }
                     });
                 }
             });
 
-            room.state.players.onRemove((_player: any, sessionId: string) => {
+            state.players.onRemove((_player: any, sessionId: string) => {
                 if (players[sessionId]) {
                     players[sessionId].mesh.dispose();
                     players[sessionId].marker.dispose();
@@ -303,7 +314,9 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                 }
             });
 
-            room.state.zones.onAdd((zone: any, _key: string) => {
+            state.zones.onAdd((zone: any, _key: string) => {
+                updateZonesHUD(state.zones);
+            // ... (rest of zone logic)
                 updateZonesHUD(room.state.zones);
                 
                 // Base Visualization 
@@ -343,7 +356,6 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                     fill.scaling.set(p, 1, p);
                 });
             });
-        });
 
         const updateHUD = () => {
             if (!room) return;
@@ -423,7 +435,7 @@ const connectColyseus = async (scene: BABYLON.Scene, camera: BABYLON.UniversalCa
                 }
             }
         });
-
+        });
     } catch (e) {
         console.error("JOIN ERROR", e);
     }

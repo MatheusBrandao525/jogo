@@ -73,6 +73,11 @@ export class ClassSystem {
             card.addEventListener('click', () => {
                 const classKey = (card as HTMLElement).dataset.class;
                 if (classKey && this.currentPlayerLevel >= CLASS_CONFIG[classKey].unlockLevel) {
+                    // Lock pointer immediately on user interaction
+                    const canvas = document.getElementById("renderCanvas");
+                    if (canvas) {
+                        canvas.requestPointerLock();
+                    }
                     this.selectClass(classKey);
                 }
             });
@@ -99,9 +104,10 @@ export class ClassSystem {
         
         // Clear previous UI and show countdown
         this.uiElement.innerHTML = `
-            <div style="font-size: 48px; font-weight: bold; text-transform: uppercase; letter-spacing: 5px; color: white;">
+            <div style="font-size: 48px; font-weight: bold; text-transform: uppercase; letter-spacing: 5px; color: white; text-shadow: 0 4px 10px rgba(0,0,0,0.5);">
                 Deploying in...
                 <div id="deploymentTimer" style="font-size: 120px; color: #2ecc71; margin-top: 20px;">3</div>
+                <div style="font-size: 16px; margin-top: 20px; opacity: 0.7;">Prepare for Combat</div>
             </div>
         `;
 
@@ -123,9 +129,9 @@ export class ClassSystem {
                 this.isCountingDown = false;
                 this.hide();
                 
-                // Trigger pointer lock
+                // Final Pointer Lock attempt if not already locked
                 const canvas = document.getElementById("renderCanvas");
-                if (canvas) {
+                if (canvas && document.pointerLockElement !== canvas) {
                     canvas.requestPointerLock();
                 }
             }
